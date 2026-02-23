@@ -1,5 +1,5 @@
 // api/quiniela_er.js — Vercel Serverless Function
-// Parser robusto para quinieladehoy.com.ar — Quiniela Entre Ríos
+// Fuente: quinieladehoy.com.ar — parser corregido para 20 números por sorteo
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,73 +20,72 @@ export default async function handler(req, res) {
 
   const resultado = {
     actualizado: ahora,
-    sorteos: Object.fromEntries(sorteosDef.map(s => [s.key, { nombre: s.nombre, fecha: hoy, numeros: [] }])),
+    sorteos: Object.fromEntries(
+      sorteosDef.map(s => [s.key, { nombre: s.nombre, fecha: hoy, numeros: [] }])
+    ),
   };
 
   try {
     const response = await fetch('https://quinieladehoy.com.ar/quiniela/quiniela-entre-rios', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'es-AR,es;q=0.9',
         'Referer': 'https://www.google.com/',
-        'Cache-Control': 'no-cache',
       },
     });
 
     const html = await response.text();
 
-    // Convertir HTML a texto limpio
+    // Texto plano limpio
     const texto = html
       .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(?:div|p|li|tr|td|th|h[1-6]|section|article)>/gi, '\n')
-      .replace(/<[^>]+>/g, ' ')
+      .replace(/<\/(?:div|p|li|tr|td|th|h[1-6]|section|span)>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
       .replace(/&nbsp;/gi, ' ')
-      .replace(/&[a-z]+;/gi, ' ')
+      .replace(/&[a-z#\d]+;/gi, ' ')
       .replace(/[ \t]+/g, ' ')
-      .replace(/\n{3,}/g, '\n\n');
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
     for (const { key, nombre } of sorteosDef) {
-      // Busca: "Quiniela Entre Rios Previa" seguido de fecha y 20 pares pos-número
-      // Variantes: con/sin tilde, con/sin espacios
-      const pattern = new RegExp(
-        'Quiniela\\s+Entre\\s+R[ií]os\\s+' + nombre + '[\\s\\d\\-\\/]+((?:\\d+\\s+\\d{4}[\\s\\n]+){1,20})',
+      // El sitio estructura como:
+      // "Quiniela Entre Rios Previa21-02-2026\n1\n2773\n2\n3703\n3\n5834..."
+      // Buscamos el bloque de cada sorteo hasta el siguiente sorteo o fin
+      const escapedNombre = nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      
+      // Captura todo el bloque entre este sorteo y el siguiente
+      const blockPattern = new RegExp(
+        'Quiniela Entre Rios\\s+' + escapedNombre + '([\\d\\-\\/]+)\\n([\\s\\S]+?)(?=Quiniela Entre Rios|Probá|$)',
         'i'
       );
+      const blockMatch = texto.match(blockPattern);
 
-      const m = texto.match(pattern);
-      if (m) {
-        // Extraer fecha del bloque
-        const fechaM = m[0].match(/(\d{2}[\-\/]\d{2}[\-\/]\d{4})/);
-        if (fechaM) {
-          resultado.sorteos[key].fecha = fechaM[1].replace(/-/g, '/');
-        }
+      if (blockMatch) {
+        // Extraer fecha
+        const fechaRaw = blockMatch[1].trim();
+        resultado.sorteos[key].fecha = fechaRaw.replace(/-/g, '/');
 
-        // Extraer los pares posición-número
-        const pares = [...m[1].matchAll(/(\d+)\s+(\d{4})/g)];
-        resultado.sorteos[key].numeros = pares.slice(0, 20).map(p => ({
-          pos: parseInt(p[1]),
-          num: p[2],
-        }));
-      } else {
-        // Estrategia 2: buscar por sección del HTML con número de 4 dígitos
-        // "1\n2773\n2\n3703..." patrón alternativo
-        const alt = new RegExp(nombre + '[^\\d]{0,80}((?:\\d+\\s+\\d{4}[\\s\\n]+){5,20})', 'i');
-        const m2 = texto.match(alt);
-        if (m2) {
-          const pares = [...m2[1].matchAll(/(\d+)\s+(\d{4})/g)];
-          resultado.sorteos[key].numeros = pares.slice(0, 20).map(p => ({
-            pos: parseInt(p[1]),
-            num: p[2],
-          }));
+        // El bloque tiene líneas: "1\n2773\n2\n3703..."
+        // Extraer todos los pares número-de-posición + número-de-4-cifras
+        const bloque = blockMatch[2];
+        const lineas = bloque.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        
+        const numeros = [];
+        let i = 0;
+        while (i < lineas.length && numeros.length < 20) {
+          const pos = parseInt(lineas[i]);
+          const num = lineas[i + 1];
+          // pos debe ser 1-20, num debe ser exactamente 4 dígitos
+          if (!isNaN(pos) && pos >= 1 && pos <= 20 && num && /^\d{4}$/.test(num)) {
+            numeros.push({ pos, num });
+            i += 2;
+          } else {
+            i++;
+          }
         }
+        resultado.sorteos[key].numeros = numeros;
       }
-    }
-
-    // Debug: si todos vacíos, incluir fragmento del texto
-    const todosVacios = Object.values(resultado.sorteos).every(s => s.numeros.length === 0);
-    if (todosVacios) {
-      resultado._debug = texto.substring(0, 2000);
     }
 
     res.status(200).json(resultado);
