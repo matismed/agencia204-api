@@ -1,5 +1,4 @@
-// api/quiniela_er.js — Fuente: loteriasmundiales.com.ar
-// Busca cada quiniela por su URL en la tabla de cabezas del día
+// api/quiniela_er.js — loteriasmundiales.com.ar — parser por strong + posición en tabla
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,12 +9,12 @@ export default async function handler(req, res) {
   const hoy   = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
 
   const provincias = [
-    { key: 'nacional',   nombre: 'Nacional',     url: '/Quinielas/ciudad'        },
-    { key: 'bsas',       nombre: 'Buenos Aires', url: '/Quinielas/buenos-aires'  },
-    { key: 'cordoba',    nombre: 'Córdoba',       url: '/Quinielas/cordoba'       },
-    { key: 'entrerrios', nombre: 'Entre Ríos',    url: '/Quinielas/entre-rios'    },
-    { key: 'santafe',    nombre: 'Santa Fe',      url: '/Quinielas/santa-fe'      },
-    { key: 'montevideo', nombre: 'Montevideo',    url: '/Quinielas/uruguaya'      },
+    { key: 'nacional',   nombre: 'Nacional'     },
+    { key: 'bsas',       nombre: 'Buenos Aires' },
+    { key: 'cordoba',    nombre: 'Córdoba'       },
+    { key: 'entrerrios', nombre: 'Entre Ríos'    },
+    { key: 'santafe',    nombre: 'Santa Fe'      },
+    { key: 'montevideo', nombre: 'Montevideo'    },
   ];
 
   const sorteosCols = ['previa','primera','matutina','vespertina','nocturna'];
@@ -25,7 +24,6 @@ export default async function handler(req, res) {
     fecha: hoy,
     provincias: {},
   };
-
   for (const p of provincias) {
     resultado.provincias[p.key] = {
       nombre: p.nombre,
@@ -45,54 +43,75 @@ export default async function handler(req, res) {
 
     const html = await response.text();
 
-    // Estrategia: cada fila de la tabla tiene un <a href="/Quinielas/ciudad"> (o similar)
-    // seguido de exactamente 5 celdas con los números <strong>XXXX</strong>
-    // Las celdas vacías son &nbsp; o simplemente vacías
+    // La tabla tiene forms con value="/Quinielas/ciudad" etc.
+    // Estructura real:
+    // <form action="/Quinielas/ciudad">...<input value="2026/...">...</form>
+    // Luego las celdas con <b>9964</b> o vacías en la misma fila <tr>
 
-    for (const p of provincias) {
-      // Buscar la fila que contiene el link a esta quiniela
-      // Patrón: href="/Quinielas/ciudad" ... hasta </tr>
-      const escapedUrl = p.url.replace(/\//g, '\\/');
-      const rowRe = new RegExp(
-        '<tr[^>]*>[\\s\\S]*?href="' + escapedUrl + '"[\\s\\S]*?<\\/tr>',
-        'i'
-      );
-      const rowMatch = html.match(rowRe);
-      if (!rowMatch) continue;
+    // Mapeo de quiniela → valor del input hidden de fecha en el form
+    const quinielaForms = {
+      nacional:   'Quiniela de la Ciudad',
+      bsas:       'Quiniela Buenos Aires',
+      cordoba:    'Quiniela Córdoba',
+      entrerrios: 'Quiniela Entre Ríos',
+      santafe:    'Quiniela Santa Fe',
+      montevideo: 'Quiniela Uruguay',
+    };
 
-      const row = rowMatch[0];
+    // Estrategia: extraer todas las filas <tr> de la tabla de cabezas
+    // y para cada una detectar cuál quiniela es por el value del form
+    const tablaStart = html.indexOf('Cabezas del día');
+    if (tablaStart === -1) throw new Error('Tabla no encontrada');
 
-      // Extraer las 5 celdas de números de esta fila
-      // Cada celda tiene <strong>XXXX</strong> si hay número, o está vacía/&nbsp;
-      const celdas = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+    // Tomar sección de la tabla
+    const tablaHtml = html.substring(tablaStart, tablaStart + 20000);
 
-      // Filtrar solo las celdas numéricas (las que tienen <strong> con 4 dígitos o están vacías)
-      const valores = [];
-      for (const c of celdas) {
-        const strongMatch = c[1].match(/<strong>\s*(\d{3,4})\s*<\/strong>/i);
-        if (strongMatch) {
-          valores.push(strongMatch[1].padStart(4, '0'));
-        } else if (/^\s*(&nbsp;)?\s*$/.test(c[1].replace(/<[^>]+>/g, ''))) {
-          valores.push(null); // celda vacía = sorteo no disponible aún
+    // Extraer filas
+    const filas = [...tablaHtml.matchAll(/<tr[\s\S]+?<\/tr>/gi)];
+
+    for (const filaMatch of filas) {
+      const fila = filaMatch[0];
+
+      // Detectar qué quiniela es por el action del form o el value
+      let quinielaKey = null;
+      for (const [key, nombre] of Object.entries(quinielaForms)) {
+        if (fila.includes(nombre) || 
+            fila.toLowerCase().includes(nombre.toLowerCase())) {
+          quinielaKey = key;
+          break;
         }
       }
 
-      // Asignar a cada sorteo
+      // También detectar por action="/Quinielas/xxx"
+      if (!quinielaKey) {
+        if (fila.includes('/Quinielas/ciudad'))        quinielaKey = 'nacional';
+        else if (fila.includes('/Quinielas/buenos-aires')) quinielaKey = 'bsas';
+        else if (fila.includes('/Quinielas/cordoba'))      quinielaKey = 'cordoba';
+        else if (fila.includes('/Quinielas/entre-rios'))   quinielaKey = 'entrerrios';
+        else if (fila.includes('/Quinielas/santa-fe'))     quinielaKey = 'santafe';
+        else if (fila.includes('/Quinielas/uruguaya'))     quinielaKey = 'montevideo';
+      }
+
+      if (!quinielaKey) continue;
+
+      // Extraer los números de la fila — están en <b>XXXX</b> o <strong>XXXX</strong>
+      const nums = [...fila.matchAll(/<(?:b|strong)>\s*(\d{3,4})\s*<\/(?:b|strong)>/gi)]
+        .map(m => m[1].padStart(4, '0'));
+
+      // Asignar a cada sorteo en orden
       sorteosCols.forEach((sorteo, i) => {
-        const num = valores[i];
-        resultado.provincias[p.key].sorteos[sorteo].numeros = num
-          ? [{ pos: 1, num }]
-          : [];
+        if (nums[i]) {
+          resultado.provincias[quinielaKey].sorteos[sorteo].numeros = [{ pos: 1, num: nums[i] }];
+        }
       });
     }
 
-    // Debug si todo vacío
+    // Verificar si obtuvimos datos
     const algunoDato = Object.values(resultado.provincias)
       .some(p => Object.values(p.sorteos).some(s => s.numeros.length > 0));
+
     if (!algunoDato) {
-      // Devolver fragmento del HTML para diagnóstico
-      const tablaIdx = html.indexOf('Cabezas del día');
-      resultado._debug = tablaIdx > 0 ? html.substring(tablaIdx, tablaIdx + 3000) : html.substring(0, 3000);
+      resultado._debug = tablaHtml.substring(0, 3000);
     }
 
     res.status(200).json(resultado);
