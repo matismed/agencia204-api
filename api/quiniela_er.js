@@ -1,93 +1,104 @@
-// api/quiniela_er.js — Todas las quinielas + Montevideo (página propia, números 3 dígitos)
+// api/quiniela_er.js — Fuente: loteriasmundiales.com.ar
+// Busca cada quiniela por su URL en la tabla de cabezas del día
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=1800');
+  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
 
   const ahora = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
   const hoy   = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
 
   const provincias = [
-    { key: 'nacional',   nombre: 'Nacional',     label: 'Quiniela Nacional'     },
-    { key: 'bsas',       nombre: 'Buenos Aires', label: 'Quiniela Buenos Aires' },
-    { key: 'cordoba',    nombre: 'Córdoba',       label: 'Quiniela Córdoba'      },
-    { key: 'santafe',    nombre: 'Santa Fe',      label: 'Quiniela Santa Fe'     },
-    { key: 'entrerrios', nombre: 'Entre Ríos',    label: 'Quiniela Entre Rios'   },
+    { key: 'nacional',   nombre: 'Nacional',     url: '/Quinielas/ciudad'        },
+    { key: 'bsas',       nombre: 'Buenos Aires', url: '/Quinielas/buenos-aires'  },
+    { key: 'cordoba',    nombre: 'Córdoba',       url: '/Quinielas/cordoba'       },
+    { key: 'entrerrios', nombre: 'Entre Ríos',    url: '/Quinielas/entre-rios'    },
+    { key: 'santafe',    nombre: 'Santa Fe',      url: '/Quinielas/santa-fe'      },
+    { key: 'montevideo', nombre: 'Montevideo',    url: '/Quinielas/uruguaya'      },
   ];
 
-  const sorteos = ['previa','primera','matutina','vespertina','nocturna'];
+  const sorteosCols = ['previa','primera','matutina','vespertina','nocturna'];
 
   const resultado = {
     actualizado: ahora,
+    fecha: hoy,
     provincias: {},
   };
 
-  // Inicializar todas las provincias incluyendo Montevideo
-  for (const p of [...provincias, { key: 'montevideo', nombre: 'Montevideo' }]) {
+  for (const p of provincias) {
     resultado.provincias[p.key] = {
       nombre: p.nombre,
-      sorteos: Object.fromEntries(sorteos.map(s => [s, { fecha: hoy, numeros: [] }])),
+      sorteos: Object.fromEntries(sorteosCols.map(s => [s, { fecha: hoy, numeros: [] }])),
     };
   }
 
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'text/html,application/xhtml+xml',
-    'Accept-Language': 'es-AR,es;q=0.9',
-    'Referer': 'https://www.google.com/',
-  };
-
-  // ── Fetch Argentina (página principal con todas las quinielas) ──
   try {
-    const html = await fetch('https://quinieladehoy.com.ar/quiniela', { headers })
-      .then(r => r.text());
+    const response = await fetch('https://www.loteriasmundiales.com.ar/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'es-AR,es;q=0.9',
+        'Referer': 'https://www.google.com/',
+      },
+    });
+
+    const html = await response.text();
+
+    // Estrategia: cada fila de la tabla tiene un <a href="/Quinielas/ciudad"> (o similar)
+    // seguido de exactamente 5 celdas con los números <strong>XXXX</strong>
+    // Las celdas vacías son &nbsp; o simplemente vacías
 
     for (const p of provincias) {
-      for (const sorteo of sorteos) {
-        const labelPattern = p.label + '\\s+' + sorteo.charAt(0).toUpperCase() + sorteo.slice(1);
-        const blockRe = new RegExp(
-          labelPattern + '[\\s\\S]+?<span[^>]*>([\\d\\-]+)<\\/span>' +
-          '[\\s\\S]+?class="listado-numeros"([\\s\\S]+?)(?=class="datos-sorteo|$)', 'i'
-        );
-        const m = html.match(blockRe);
-        if (m) {
-          resultado.provincias[p.key].sorteos[sorteo].fecha = m[1].replace(/-/g, '/');
-          const pares = [...m[2].matchAll(/class="posicion">(\d+)<\/div>\s*<div class="numero">(\d{3,4})<\/div>/g)];
-          resultado.provincias[p.key].sorteos[sorteo].numeros = pares.slice(0, 20).map(p => ({
-            pos: parseInt(p[1]), num: p[2],
-          }));
+      // Buscar la fila que contiene el link a esta quiniela
+      // Patrón: href="/Quinielas/ciudad" ... hasta </tr>
+      const escapedUrl = p.url.replace(/\//g, '\\/');
+      const rowRe = new RegExp(
+        '<tr[^>]*>[\\s\\S]*?href="' + escapedUrl + '"[\\s\\S]*?<\\/tr>',
+        'i'
+      );
+      const rowMatch = html.match(rowRe);
+      if (!rowMatch) continue;
+
+      const row = rowMatch[0];
+
+      // Extraer las 5 celdas de números de esta fila
+      // Cada celda tiene <strong>XXXX</strong> si hay número, o está vacía/&nbsp;
+      const celdas = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+
+      // Filtrar solo las celdas numéricas (las que tienen <strong> con 4 dígitos o están vacías)
+      const valores = [];
+      for (const c of celdas) {
+        const strongMatch = c[1].match(/<strong>\s*(\d{3,4})\s*<\/strong>/i);
+        if (strongMatch) {
+          valores.push(strongMatch[1].padStart(4, '0'));
+        } else if (/^\s*(&nbsp;)?\s*$/.test(c[1].replace(/<[^>]+>/g, ''))) {
+          valores.push(null); // celda vacía = sorteo no disponible aún
         }
       }
+
+      // Asignar a cada sorteo
+      sorteosCols.forEach((sorteo, i) => {
+        const num = valores[i];
+        resultado.provincias[p.key].sorteos[sorteo].numeros = num
+          ? [{ pos: 1, num }]
+          : [];
+      });
     }
-  } catch(e) { resultado._errorAR = e.message; }
 
-  // ── Fetch Montevideo (página propia, números de 3 dígitos) ──
-  try {
-    const html = await fetch('https://quinieladehoy.com.ar/quiniela/quiniela-montevideo', { headers })
-      .then(r => r.text());
-
-    // Montevideo solo tiene Matutina y Nocturna
-    for (const sorteo of sorteos) {
-      const nombre = sorteo.charAt(0).toUpperCase() + sorteo.slice(1);
-      const blockRe = new RegExp(
-        'Quiniela Montevideo\\s+' + nombre +
-        '[\\s\\S]+?<span[^>]*>([\\d\\-]+)<\\/span>' +
-        '[\\s\\S]+?class="listado-numeros"([\\s\\S]+?)(?=class="datos-sorteo|$)', 'i'
-      );
-      const m = html.match(blockRe);
-      if (m) {
-        resultado.provincias.montevideo.sorteos[sorteo].fecha = m[1].replace(/-/g, '/');
-        // Números de 3 dígitos — los mostramos con padding a 4 (ej: 421 → 0421)
-        const pares = [...m[2].matchAll(/class="posicion">(\d+)<\/div>\s*<div class="numero">(\d{3,4})<\/div>/g)];
-        resultado.provincias.montevideo.sorteos[sorteo].numeros = pares.slice(0, 20).map(p => ({
-          pos: parseInt(p[1]),
-          num: p[2].padStart(4, '0'),
-        }));
-      }
+    // Debug si todo vacío
+    const algunoDato = Object.values(resultado.provincias)
+      .some(p => Object.values(p.sorteos).some(s => s.numeros.length > 0));
+    if (!algunoDato) {
+      // Devolver fragmento del HTML para diagnóstico
+      const tablaIdx = html.indexOf('Cabezas del día');
+      resultado._debug = tablaIdx > 0 ? html.substring(tablaIdx, tablaIdx + 3000) : html.substring(0, 3000);
     }
-  } catch(e) { resultado._errorMVD = e.message; }
 
-  res.status(200).json(resultado);
+    res.status(200).json(resultado);
+
+  } catch (err) {
+    resultado._error = err.message;
+    res.status(200).json(resultado);
+  }
 }
-
