@@ -1,4 +1,4 @@
-// api/quiniela_er.js — Todas las quinielas desde quinieladehoy.com.ar/quiniela
+// api/quiniela_er.js — Todas las quinielas + Montevideo (página propia, números 3 dígitos)
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,89 +9,85 @@ export default async function handler(req, res) {
   const hoy   = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
 
   const provincias = [
-    { key: 'nacional',    nombre: 'Nacional',     label: 'Quiniela Nacional'     },
-    { key: 'bsas',        nombre: 'Buenos Aires', label: 'Quiniela Buenos Aires' },
-    { key: 'cordoba',     nombre: 'Córdoba',      label: 'Quiniela Córdoba'      },
-    { key: 'santafe',     nombre: 'Santa Fe',     label: 'Quiniela Santa Fe'     },
-    { key: 'entrerrios',  nombre: 'Entre Ríos',   label: 'Quiniela Entre Rios'   },
-    { key: 'montevideo',  nombre: 'Montevideo',   label: 'Quiniela Montevideo'   },
+    { key: 'nacional',   nombre: 'Nacional',     label: 'Quiniela Nacional'     },
+    { key: 'bsas',       nombre: 'Buenos Aires', label: 'Quiniela Buenos Aires' },
+    { key: 'cordoba',    nombre: 'Córdoba',       label: 'Quiniela Córdoba'      },
+    { key: 'santafe',    nombre: 'Santa Fe',      label: 'Quiniela Santa Fe'     },
+    { key: 'entrerrios', nombre: 'Entre Ríos',    label: 'Quiniela Entre Rios'   },
   ];
 
   const sorteos = ['previa','primera','matutina','vespertina','nocturna'];
 
-  // Estructura resultado
   const resultado = {
     actualizado: ahora,
     provincias: {},
   };
-  for (const p of provincias) {
+
+  // Inicializar todas las provincias incluyendo Montevideo
+  for (const p of [...provincias, { key: 'montevideo', nombre: 'Montevideo' }]) {
     resultado.provincias[p.key] = {
       nombre: p.nombre,
       sorteos: Object.fromEntries(sorteos.map(s => [s, { fecha: hoy, numeros: [] }])),
     };
   }
 
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'text/html,application/xhtml+xml',
+    'Accept-Language': 'es-AR,es;q=0.9',
+    'Referer': 'https://www.google.com/',
+  };
+
+  // ── Fetch Argentina (página principal con todas las quinielas) ──
   try {
-    const response = await fetch('https://quinieladehoy.com.ar/quiniela', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'es-AR,es;q=0.9',
-        'Referer': 'https://www.google.com/',
-      },
-    });
+    const html = await fetch('https://quinieladehoy.com.ar/quiniela', { headers })
+      .then(r => r.text());
 
-    const html = await response.text();
-
-    // Parsear cada provincia × cada sorteo
-    // Estructura HTML: class="posicion">N</div><div class="numero">XXXX</div>
     for (const p of provincias) {
       for (const sorteo of sorteos) {
-        // Buscar bloque: "<span>Quiniela Nacional Previa23-02-2026</span>..."
-        // El label en HTML: "Quiniela Nacional Previa" o "Quiniela Buenos Aires Previa" etc.
-        const labelPattern = p.label + '\\s+' + 
-          sorteo.charAt(0).toUpperCase() + sorteo.slice(1);
-        
+        const labelPattern = p.label + '\\s+' + sorteo.charAt(0).toUpperCase() + sorteo.slice(1);
         const blockRe = new RegExp(
           labelPattern + '[\\s\\S]+?<span[^>]*>([\\d\\-]+)<\\/span>' +
-          '[\\s\\S]+?class="listado-numeros"([\\s\\S]+?)' +
-          '(?=class="datos-sorteo|$)',
-          'i'
+          '[\\s\\S]+?class="listado-numeros"([\\s\\S]+?)(?=class="datos-sorteo|$)', 'i'
         );
-
         const m = html.match(blockRe);
         if (m) {
           resultado.provincias[p.key].sorteos[sorteo].fecha = m[1].replace(/-/g, '/');
-          const bloque = m[2];
-          const pares = [...bloque.matchAll(/class="posicion">(\d+)<\/div>\s*<div class="numero">(\d{4})<\/div>/g)];
+          const pares = [...m[2].matchAll(/class="posicion">(\d+)<\/div>\s*<div class="numero">(\d{3,4})<\/div>/g)];
           resultado.provincias[p.key].sorteos[sorteo].numeros = pares.slice(0, 20).map(p => ({
-            pos: parseInt(p[1]),
-            num: p[2],
+            pos: parseInt(p[1]), num: p[2],
           }));
-        } else {
-          // Fallback: buscar solo por label+sorteo sin fecha
-          const altRe = new RegExp(
-            p.label + '[^<]*' + sorteo.charAt(0).toUpperCase() + sorteo.slice(1) +
-            '[\\s\\S]{0,200}?class="listado-numeros"([\\s\\S]+?)(?=class="datos-sorteo|$)',
-            'i'
-          );
-          const m2 = html.match(altRe);
-          if (m2) {
-            const pares = [...m2[1].matchAll(/class="posicion">(\d+)<\/div>\s*<div class="numero">(\d{4})<\/div>/g)];
-            resultado.provincias[p.key].sorteos[sorteo].numeros = pares.slice(0, 20).map(p => ({
-              pos: parseInt(p[1]),
-              num: p[2],
-            }));
-          }
         }
       }
     }
+  } catch(e) { resultado._errorAR = e.message; }
 
-    res.status(200).json(resultado);
+  // ── Fetch Montevideo (página propia, números de 3 dígitos) ──
+  try {
+    const html = await fetch('https://quinieladehoy.com.ar/quiniela/quiniela-montevideo', { headers })
+      .then(r => r.text());
 
-  } catch (err) {
-    resultado._error = err.message;
-    res.status(200).json(resultado);
-  }
+    // Montevideo solo tiene Matutina y Nocturna
+    for (const sorteo of sorteos) {
+      const nombre = sorteo.charAt(0).toUpperCase() + sorteo.slice(1);
+      const blockRe = new RegExp(
+        'Quiniela Montevideo\\s+' + nombre +
+        '[\\s\\S]+?<span[^>]*>([\\d\\-]+)<\\/span>' +
+        '[\\s\\S]+?class="listado-numeros"([\\s\\S]+?)(?=class="datos-sorteo|$)', 'i'
+      );
+      const m = html.match(blockRe);
+      if (m) {
+        resultado.provincias.montevideo.sorteos[sorteo].fecha = m[1].replace(/-/g, '/');
+        // Números de 3 dígitos — los mostramos con padding a 4 (ej: 421 → 0421)
+        const pares = [...m[2].matchAll(/class="posicion">(\d+)<\/div>\s*<div class="numero">(\d{3,4})<\/div>/g)];
+        resultado.provincias.montevideo.sorteos[sorteo].numeros = pares.slice(0, 20).map(p => ({
+          pos: parseInt(p[1]),
+          num: p[2].padStart(4, '0'),
+        }));
+      }
+    }
+  } catch(e) { resultado._errorMVD = e.message; }
+
+  res.status(200).json(resultado);
 }
 
