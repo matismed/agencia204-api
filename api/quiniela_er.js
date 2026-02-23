@@ -1,4 +1,4 @@
-// api/quiniela_er.js — versión debug para ver el HTML real que llega
+// api/quiniela_er.js — debug v2: muestra la parte del medio del HTML
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,12 +16,19 @@ export default async function handler(req, res) {
     });
 
     const html = await response.text();
+    const total = html.length;
+    const medio = Math.floor(total / 2);
 
-    // Devolver los primeros 3000 caracteres del HTML crudo para diagnóstico
+    // Buscar donde dice "Previa" o "Quiniela Entre" para encontrar los datos
+    const idxPrevia = html.indexOf('Previa');
+    const idxQuiniela = html.indexOf('Quiniela Entre');
+
     res.status(200).json({
-      status: response.status,
-      longitud: html.length,
-      muestra: html.substring(0, 3000),
+      total,
+      idxPrevia,
+      idxQuiniela,
+      // Muestra 2000 chars desde donde aparece "Previa"
+      desdePrevia: idxPrevia > 0 ? html.substring(idxPrevia - 100, idxPrevia + 2000) : 'NO ENCONTRADO',
     });
 
   } catch (err) {
