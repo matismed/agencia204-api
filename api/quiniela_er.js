@@ -65,7 +65,15 @@ export default async function handler(req, res) {
     const desde = matchInicio.index + matchInicio[0].length;
 
     // Tomar los próximos ~800 caracteres después del encabezado
-    const fragmento = textoPlano.substring(desde, desde + 800);
+    //const fragmento = textoPlano.substring(desde, desde + 800);
+    // Cortar hasta el próximo bloque de quiniela o fin de texto
+    const resto = textoPlano.substring(desde);
+
+    const finMatch = resto.search(/Quiniela\s+[A-Za-zÁÉÍÓÚñÑ ]+\s+(Previa|Primera|Matutina|Vespertina|Nocturna)\d{2}-\d{2}-\d{4}/i);
+
+    const fragmento = finMatch !== -1
+    ? resto.substring(0, finMatch)
+    : resto;
 
     // Los números están en líneas: posición (1-20) seguida del número (3-4 dígitos)
     // Patrón: líneas con solo dígitos, alternando posición y número
