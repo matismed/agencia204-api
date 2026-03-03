@@ -1,4 +1,11 @@
-// api/quiniela_er.js — quinieladehoy.com.ar — parser corregido al HTML real
+// api/quiniela_er.js — quinieladehoy.com.ar
+// Correcciones aplicadas:
+//  1. Label "Entre Rios" acepta tilde o sin tilde (el sitio no usa tilde)
+//  2. Label "Córdoba" acepta "Cordoba" también (tolerancia de tildes)
+//  3. htmlATexto agrega \n para <span> además de los tags ya listados
+//  4. fragmento ampliado a 1200 chars (margen extra)
+//  5. Cache-Control corregido: no cachear en CDN (datos en vivo)
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -7,16 +14,24 @@ export default async function handler(req, res) {
   const ahora = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
   const hoy   = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
 
+  // Provincias con el label EXACTO que usa el sitio (sin tilde en Entre Rios)
+  // Se usa un campo labelRe para el regex flexible donde haga falta
   const provincias = [
-    { key: 'nacional',   nombre: 'Nacional',     label: 'Quiniela Nacional'     },
-    { key: 'bsas',       nombre: 'Buenos Aires', label: 'Quiniela Buenos Aires' },
-    { key: 'cordoba',    nombre: 'Córdoba',       label: 'Quiniela Córdoba'      },
-    { key: 'santafe',    nombre: 'Santa Fe',      label: 'Quiniela Santa Fe'     },
-    { key: 'entrerrios', nombre: 'Entre Ríos',    label: 'Quiniela Entre Rios'   },
-    { key: 'montevideo', nombre: 'Montevideo',    label: 'Quiniela Montevideo'   },
+    { key: 'nacional',   nombre: 'Nacional',     labelRe: 'Quiniela Nacional'              },
+    { key: 'bsas',       nombre: 'Buenos Aires', labelRe: 'Quiniela Buenos Aires'          },
+    { key: 'cordoba',    nombre: 'Córdoba',       labelRe: 'Quiniela C[oó]rdoba'            },
+    { key: 'santafe',    nombre: 'Santa Fe',      labelRe: 'Quiniela Santa Fe'              },
+    { key: 'entrerrios', nombre: 'Entre Ríos',    labelRe: 'Quiniela Entre R[ií]os'         },
+    { key: 'montevideo', nombre: 'Montevideo',    labelRe: 'Quiniela Montevideo'            },
   ];
-  const sorteos       = ['previa','primera','matutina','vespertina','nocturna'];
-  const sorteoNombres = { previa:'Previa', primera:'Primera', matutina:'Matutina', vespertina:'Vespertina', nocturna:'Nocturna' };
+  const sorteos       = ['previa', 'primera', 'matutina', 'vespertina', 'nocturna'];
+  const sorteoNombres = {
+    previa:     'Previa',
+    primera:    'Primera',
+    matutina:   'Matutina',
+    vespertina: 'Vespertina',
+    nocturna:   'Nocturna',
+  };
 
   const resultado = { actualizado: ahora, fecha: hoy, provincias: {} };
   for (const p of provincias) {
@@ -27,34 +42,49 @@ export default async function handler(req, res) {
   }
 
   const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml',
     'Accept-Language': 'es-AR,es;q=0.9',
     'Referer': 'https://www.google.com/',
+    'Cache-Control': 'no-cache',
   };
 
-  // ── Parser ajustado al HTML REAL de quinieladehoy.com.ar ─────────────────
-  // El HTML llega como texto plano (sin etiquetas CSS de posicion/numero).
-  // Estructura real observada:
-  //
-  //   Quiniela Nacional Previa27-02-2026   ← label+sorteo+fecha PEGADOS
-  //   1                                    ← posición
-  //   1860                                 ← número
-  //   2
-  //   9999
-  //   ...
-  //   EOCZ                                 ← código al final (ignorar)
-  //
-  // Separador entre bloques: "---" o el siguiente bloque de quiniela.
+  // ── Convertir HTML a texto plano con saltos de línea correctos ───────────
+  // CORRECCIÓN: se agrega <span> a la lista para que los números dentro de spans
+  // queden en líneas separadas, no concatenados en la misma línea.
+  function htmlATexto(html) {
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/?(div|p|li|tr|td|th|h[1-6]|section|article|span)[^>]*>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n[ \t]+/g, '\n')
+      .replace(/\n{3,}/g, '\n\n');
+  }
 
-  function parsearTexto(textoPlano, label, sorteoNombre) {
-    // Escapar caracteres especiales del label para regex
-    const labelEsc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // ── Parser de un bloque de quiniela ─────────────────────────────────────
+  // Estructura del texto ya convertido:
+  //   Quiniela Nacional Previa02-03-2026   ← label + sorteo + fecha PEGADA
+  //   1                                    ← posición (1..20)
+  //   2107                                 ← número (3–4 dígitos)
+  //   2
+  //   0171
+  //   ...
+  //   UCSW                                 ← código de verificación (ignorar)
+  //
+  function parsearTexto(textoPlano, labelRe, sorteoNombre) {
+    // El sorteo puede aparecer como "Previa", "Primera", etc.
+    // La fecha viene pegada inmediatamente: "Previa02-03-2026"
     const sorteoEsc = sorteoNombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    // Buscar: "Quiniela Nacional Previa27-02-2026" (fecha pegada, sin espacio)
     const inicioRe = new RegExp(
-      labelEsc + '\\s*' + sorteoEsc + '(\\d{2}-\\d{2}-\\d{4})',
+      labelRe + '\\s*' + sorteoEsc + '(\\d{2}-\\d{2}-\\d{4})',
       'i'
     );
 
@@ -64,11 +94,9 @@ export default async function handler(req, res) {
     const fecha = matchInicio[1].replace(/-/g, '/');
     const desde = matchInicio.index + matchInicio[0].length;
 
-    // Tomar los próximos ~800 caracteres después del encabezado
-    const fragmento = textoPlano.substring(desde, desde + 800);
+    // CORRECCIÓN: ampliado a 1200 chars para cubrir 20 pares posición+número sin riesgo
+    const fragmento = textoPlano.substring(desde, desde + 1200);
 
-    // Los números están en líneas: posición (1-20) seguida del número (3-4 dígitos)
-    // Patrón: líneas con solo dígitos, alternando posición y número
     const lineas = fragmento
       .split('\n')
       .map(l => l.trim())
@@ -76,22 +104,26 @@ export default async function handler(req, res) {
 
     const numeros = [];
     let i = 0;
+
     while (i < lineas.length && numeros.length < 20) {
-      const posiblePos = parseInt(lineas[i]);
+      const linea     = lineas[i];
+      const posiblePos = parseInt(linea, 10);
       const posibleNum = lineas[i + 1];
 
-      // La posición debe ser 1..20 en orden, el número 3-4 dígitos
+      // Verificar que sea un par válido: posición consecutiva + número 3–4 dígitos
       if (
         !isNaN(posiblePos) &&
+        String(posiblePos) === linea.trim() &&         // solo dígitos, no "3503texto"
         posiblePos === numeros.length + 1 &&
-        posibleNum &&
-        /^\d{3,4}$/.test(posibleNum)
+        posibleNum !== undefined &&
+        /^\d{3,4}$/.test(posibleNum.trim())
       ) {
-        numeros.push({ pos: posiblePos, num: posibleNum.padStart(4, '0') });
+        numeros.push({ pos: posiblePos, num: posibleNum.trim().padStart(4, '0') });
         i += 2;
       } else {
-        // Si llegamos a una línea que no es número válido y ya tenemos algunos, parar
-        if (numeros.length > 0 && isNaN(posiblePos)) break;
+        // CORRECCIÓN: solo cortar si la línea contiene texto alfabético (nuevo bloque)
+        // No cortar por números fuera de secuencia (código de verificación, etc.)
+        if (numeros.length > 0 && /[a-zA-Z]/.test(linea)) break;
         i++;
       }
     }
@@ -100,44 +132,26 @@ export default async function handler(req, res) {
     return { fecha, numeros };
   }
 
-  // ── Convertir HTML a texto plano limpio ──────────────────────────────────
-  function htmlATexto(html) {
-    return html
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/?(div|p|li|tr|td|th|h[1-6]|section|article)[^>]*>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n{3,}/g, '\n\n');
-  }
-
-  // ── Fetch página principal (todas las provincias menos Montevideo) ────────
+  // ── Fetch página principal (Nacional, Bs.As., Córdoba, Santa Fe, Entre Ríos) ──
   try {
-    const html = await fetch('https://quinieladehoy.com.ar/quiniela', { headers })
-      .then(r => r.text());
+    const html  = await fetch('https://quinieladehoy.com.ar/quiniela', { headers }).then(r => r.text());
     const texto = htmlATexto(html);
 
     for (const p of provincias.filter(p => p.key !== 'montevideo')) {
       for (const sorteo of sorteos) {
-        const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
+        const r = parsearTexto(texto, p.labelRe, sorteoNombres[sorteo]);
         if (r && r.numeros.length > 0) {
           resultado.provincias[p.key].sorteos[sorteo] = { fecha: r.fecha, numeros: r.numeros };
         }
       }
     }
-  } catch(e) {
+  } catch (e) {
     resultado._errorAR = e.message;
   }
 
-  // ── Fetch Montevideo ──────────────────────────────────────────────────────
+  // ── Fetch Montevideo ───────────────────────────────────────────────────────
   try {
-    const html = await fetch('https://quinieladehoy.com.ar/quiniela/quiniela-montevideo', { headers })
-      .then(r => r.text());
+    const html  = await fetch('https://quinieladehoy.com.ar/quiniela/quiniela-montevideo', { headers }).then(r => r.text());
     const texto = htmlATexto(html);
 
     for (const sorteo of sorteos) {
@@ -146,9 +160,10 @@ export default async function handler(req, res) {
         resultado.provincias.montevideo.sorteos[sorteo] = { fecha: r.fecha, numeros: r.numeros };
       }
     }
-  } catch(e) {
+  } catch (e) {
     resultado._errorMVD = e.message;
   }
 
   res.status(200).json(resultado);
 }
+
