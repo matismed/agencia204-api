@@ -82,34 +82,78 @@ export default async function handler(req, res) {
     }
 
     // ── 4. POZO PRÓXIMO ───────────────────────────────────────────────────────
-    // Buscar montos en el texto completo y quedarnos con el mayor
-    // (el pozo del próximo sorteo siempre es el valor más grande)
-    const textoLimpio = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-
-    function parseMonto(str) {
-      const s = str.replace(/\$/g, '').trim();
-      if (/millones?/i.test(s)) {
-        return parseFloat(s.replace(/[^\d,]/g, '').replace(',', '.')) * 1_000_000;
+    // Primero buscar específicamente cerca de "Próximo Sorteo"
+    const idxProximo = html.search(/Pr[oó]ximo\s+Sorteo/i);
+    let montoEncontrado = false;
+    
+    if (idxProximo !== -1) {
+      // Tomar los próximos 1000 caracteres después de "Próximo Sorteo"
+      const ventanaProximo = html.substring(idxProximo, idxProximo + 1000);
+      
+      // Buscar patrones como: "$8.2 MIL MILLONES", "$250 MILLONES", etc.
+      const regexMonto = /\$\s*([\d,\.]+)\s*(MIL\s+MILLONES?|MILLONES?)?/i;
+      const matchMonto = ventanaProximo.match(regexMonto);
+      
+      if (matchMonto) {
+        // Limpiar el número (quitar puntos de miles, convertir coma decimal a punto)
+        let valor = parseFloat(matchMonto[1].replace(/\./g, '').replace(',', '.'));
+        const unidad = matchMonto[2] || '';
+        
+        if (/MIL\s+MILLONES?/i.test(unidad)) {
+          // Es en miles de millones (ej: $8.2 MIL MILLONES)
+          result.pozoPróximo = `$${valor.toFixed(1).replace('.0', '')} mil millones`;
+          montoEncontrado = true;
+        } else if (/MILLONES?/i.test(unidad)) {
+          // Es en millones (ej: $250 MILLONES)
+          result.pozoPróximo = `$${Math.round(valor)} millones`;
+          montoEncontrado = true;
+        } else if (valor >= 1000) {
+          // Número grande sin unidad, asumir millones
+          result.pozoPróximo = `$${Math.round(valor)} millones`;
+          montoEncontrado = true;
+        }
       }
-      return parseFloat(s.replace(/\./g, '').replace(',', '.')) || 0;
     }
+    
+    // Si no encontramos monto cerca de "Próximo Sorteo", buscar en todo el HTML
+    if (!montoEncontrado) {
+      const textoLimpio = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
-    const rePozo = /\$\s*([\d\.]+(?:\s*(?:millones?|mil millones?))?)/gi;
-    const montos = [];
-    let mp;
-    while ((mp = rePozo.exec(textoLimpio)) !== null) {
-      const val = parseMonto(mp[0]);
-      if (val >= 1_000_000) montos.push({ txt: mp[0].trim(), val });
-    }
+      function parseMonto(str) {
+        const s = str.replace(/\$/g, '').trim();
+        // Extraer el número (manejando puntos de miles y comas decimales)
+        let numero = parseFloat(s.replace(/\./g, '').replace(',', '.').replace(/[^\d\.]/g, ''));
+        
+        if (/MIL\s+MILLONES?/i.test(s)) {
+          return numero * 1_000_000_000;
+        }
+        if (/MILLONES?/i.test(s)) {
+          return numero * 1_000_000;
+        }
+        // Si el número es muy grande sin unidad, asumir millones
+        if (numero >= 1000) {
+          return numero * 1_000_000;
+        }
+        return numero;
+      }
 
-    if (montos.length > 0) {
-      montos.sort((a, b) => b.val - a.val);
-      // Formatear de forma legible
-      const mayor = montos[0].val;
-      if (mayor >= 1_000_000_000) {
-        result.pozoPróximo = '$' + (mayor / 1_000_000_000).toFixed(1).replace('.0', '') + ' mil millones';
-      } else {
-        result.pozoPróximo = '$' + (mayor / 1_000_000).toFixed(0) + ' millones';
+      const rePozo = /\$\s*([\d,\.]+)\s*(MIL\s+MILLONES?|MILLONES?)?/gi;
+      const montos = [];
+      let mp;
+      while ((mp = rePozo.exec(textoLimpio)) !== null) {
+        const val = parseMonto(mp[0]);
+        if (val >= 1_000_000) montos.push({ txt: mp[0].trim(), val });
+      }
+
+      if (montos.length > 0) {
+        montos.sort((a, b) => b.val - a.val);
+        // Formatear de forma legible
+        const mayor = montos[0].val;
+        if (mayor >= 1_000_000_000) {
+          result.pozoPróximo = '$' + (mayor / 1_000_000_000).toFixed(1).replace('.0', '') + ' mil millones';
+        } else {
+          result.pozoPróximo = '$' + Math.round(mayor / 1_000_000) + ' millones';
+        }
       }
     }
 
@@ -120,4 +164,5 @@ export default async function handler(req, res) {
     res.status(200).json(result);
   }
 }
+
 
