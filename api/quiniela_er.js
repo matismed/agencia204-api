@@ -1,4 +1,4 @@
-// api/quiniela_er.js — quinieladehoy.com.ar — parser corregido al HTML real
+// api/quiniela_er.js — Usando loteriasmundiales.com SOLO para Montevideo
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -33,26 +33,11 @@ export default async function handler(req, res) {
     'Referer': 'https://www.google.com/',
   };
 
-  // ── Parser ajustado al HTML REAL de quinieladehoy.com.ar ─────────────────
-  // El HTML llega como texto plano (sin etiquetas CSS de posicion/numero).
-  // Estructura real observada:
-  //
-  //   Quiniela Nacional Previa27-02-2026   ← label+sorteo+fecha PEGADOS
-  //   1                                    ← posición
-  //   1860                                 ← número
-  //   2
-  //   9999
-  //   ...
-  //   EOCZ                                 ← código al final (ignorar)
-  //
-  // Separador entre bloques: "---" o el siguiente bloque de quiniela.
-
-  function parsearTexto(textoPlano, label, sorteoNombre, esMontevideo = false) {
-    // Escapar caracteres especiales del label para regex
+  // ── Parser para quinieladehoy.com.ar (Argentina) ─────────────────────────
+  function parsearTexto(textoPlano, label, sorteoNombre) {
     const labelEsc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const sorteoEsc = sorteoNombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    // Buscar: "Quiniela Nacional Previa27-02-2026" (fecha pegada, sin espacio)
     const inicioRe = new RegExp(
       labelEsc + '\\s*' + sorteoEsc + '(\\d{2}-\\d{2}-\\d{4})',
       'i'
@@ -63,12 +48,8 @@ export default async function handler(req, res) {
 
     const fecha = matchInicio[1].replace(/-/g, '/');
     const desde = matchInicio.index + matchInicio[0].length;
-
-    // Tomar los próximos ~800 caracteres después del encabezado
     const fragmento = textoPlano.substring(desde, desde + 800);
 
-    // Los números están en líneas: posición (1-20) seguida del número (3-4 dígitos)
-    // Patrón: líneas con solo dígitos, alternando posición y número
     const lineas = fragmento
       .split('\n')
       .map(l => l.trim())
@@ -80,32 +61,15 @@ export default async function handler(req, res) {
       const posiblePos = parseInt(lineas[i]);
       const posibleNum = lineas[i + 1];
 
-      // La posición debe ser 1..20 en orden
       if (
         !isNaN(posiblePos) &&
         posiblePos === numeros.length + 1 &&
-        posibleNum
+        posibleNum &&
+        /^\d{3,4}$/.test(posibleNum)
       ) {
-        // Para Montevideo: buscar EXACTAMENTE 4 dígitos, no aceptar 3
-        if (esMontevideo) {
-          if (/^\d{4}$/.test(posibleNum)) {
-            numeros.push({ pos: posiblePos, num: posibleNum });
-            i += 2;
-          } else {
-            // Si el número tiene 3 dígitos, puede estar incompleto, buscar en las siguientes líneas
-            i++;
-          }
-        } else {
-          // Para el resto: aceptar 3-4 dígitos con padding
-          if (/^\d{3,4}$/.test(posibleNum)) {
-            numeros.push({ pos: posiblePos, num: posibleNum.padStart(4, '0') });
-            i += 2;
-          } else {
-            i++;
-          }
-        }
+        numeros.push({ pos: posiblePos, num: posibleNum.padStart(4, '0') });
+        i += 2;
       } else {
-        // Si llegamos a una línea que no es número válido y ya tenemos algunos, parar
         if (numeros.length > 0 && isNaN(posiblePos)) break;
         i++;
       }
@@ -115,7 +79,58 @@ export default async function handler(req, res) {
     return { fecha, numeros };
   }
 
-  // ── Convertir HTML a texto plano limpio ──────────────────────────────────
+  // ── Parser para loteriasmundiales.com.ar (Montevideo) ────────────────────
+  function parsearLoteriasMundiales(html) {
+    const sorteoMap = {
+      'matutina': '1',   // idQ11_1_N01
+      'nocturna': '3'    // idQ11_3_N01
+    };
+
+    const resultados = {};
+
+    for (const [sorteoNombre, sorteoId] of Object.entries(sorteoMap)) {
+      const numeros = [];
+      let fecha = hoy;
+
+      // Extraer fecha
+      const fechaMatch = html.match(/(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/i);
+      if (fechaMatch) {
+        const meses = {
+          'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',
+          'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',
+          'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'
+        };
+        const dia = fechaMatch[1].padStart(2, '0');
+        const mes = meses[fechaMatch[2].toLowerCase()];
+        const anio = fechaMatch[3];
+        if (mes) {
+          fecha = `${dia}/${mes}/${anio}`;
+        }
+      }
+
+      // Extraer los 20 números
+      for (let pos = 1; pos <= 20; pos++) {
+        const posStr = pos.toString().padStart(2, '0');
+        const idPattern = `idQ11_${sorteoId}_N${posStr}`;
+        
+        // Buscar: <td id="idQ11_1_N01" class="w3-theme-l1"><b>8222</b></td>
+        const regex = new RegExp(`id="${idPattern}"[^>]*>(<b>)?([0-9]{4})(</b>)?<`, 'i');
+        const match = html.match(regex);
+        
+        if (match && match[2]) {
+          numeros.push({ pos: pos, num: match[2] });
+        }
+      }
+
+      if (numeros.length > 0) {
+        resultados[sorteoNombre] = { fecha, numeros };
+      }
+    }
+
+    return resultados;
+  }
+
+  // ── Convertir HTML a texto plano ─────────────────────────────────────────
   function htmlATexto(html) {
     return html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -131,62 +146,7 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
-  // ── Parser específico para vivitusuerte.com (Montevideo) ─────────────────
-  function parsearVivitusuerte(html, sorteoNombre) {
-    // Convertir a texto plano
-    const texto = htmlATexto(html);
-    const lineas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-
-    // Buscar el sorteo (Matutina, Nocturna, etc.)
-    const sorteoIdx = lineas.findIndex(l => 
-      l.toLowerCase().includes(sorteoNombre.toLowerCase())
-    );
-
-    if (sorteoIdx === -1) return null;
-
-    // Buscar la fecha cerca del sorteo
-    let fecha = '';
-    for (let i = Math.max(0, sorteoIdx - 5); i < Math.min(lineas.length, sorteoIdx + 10); i++) {
-      if (/\d{2}-\d{2}-\d{4}/.test(lineas[i])) {
-        fecha = lineas[i].match(/\d{2}-\d{2}-\d{4}/)[0].replace(/-/g, '/');
-        break;
-      }
-    }
-
-    // Los números suelen estar después del nombre del sorteo
-    // Formato típico: posición (1-20) seguido de número de 4 dígitos
-    const numeros = [];
-    let i = sorteoIdx + 1;
-    let posEsperada = 1;
-
-    while (i < lineas.length && numeros.length < 20) {
-      const linea = lineas[i];
-      
-      // Buscar posición
-      if (linea === String(posEsperada)) {
-        // La siguiente línea debería ser el número de 4 dígitos
-        const siguienteLinea = lineas[i + 1];
-        if (siguienteLinea && /^\d{4}$/.test(siguienteLinea)) {
-          numeros.push({ pos: posEsperada, num: siguienteLinea });
-          posEsperada++;
-          i += 2;
-          continue;
-        }
-      }
-      
-      // Si encontramos otro sorteo o muchas líneas sin números, parar
-      if (linea.toLowerCase().match(/matutina|vespertina|nocturna|previa|primera/) && i > sorteoIdx + 5) {
-        break;
-      }
-      
-      i++;
-    }
-
-    if (numeros.length === 0) return null;
-    return { fecha: fecha || hoy, numeros };
-  }
-
-  // ── Fetch página principal (todas las provincias menos Montevideo) ────────
+  // ── Fetch Argentina (todas menos Montevideo) ─────────────────────────────
   try {
     const html = await fetch('https://quinieladehoy.com.ar/quiniela', { headers })
       .then(r => r.text());
@@ -204,20 +164,25 @@ export default async function handler(req, res) {
     resultado._errorAR = e.message;
   }
 
-  // ── Fetch Montevideo (desde vivitusuerte.com) ────────────────────────────
+  // ── Fetch Montevideo (desde loteriasmundiales.com.ar) ────────────────────
   try {
-    const html = await fetch('https://vivitusuerte.com/pizarra/montevideo', { headers })
+    const html = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/uruguaya', { headers })
       .then(r => r.text());
+    
+    const resultadosMVD = parsearLoteriasMundiales(html);
 
-    for (const sorteo of sorteos) {
-      const r = parsearVivitusuerte(html, sorteoNombres[sorteo]);
-      if (r && r.numeros.length > 0) {
-        resultado.provincias.montevideo.sorteos[sorteo] = { fecha: r.fecha, numeros: r.numeros };
-      }
+    // Mapear matutina y nocturna a los sorteos
+    if (resultadosMVD.matutina) {
+      resultado.provincias.montevideo.sorteos.matutina = resultadosMVD.matutina;
     }
+    if (resultadosMVD.nocturna) {
+      resultado.provincias.montevideo.sorteos.nocturna = resultadosMVD.nocturna;
+    }
+
   } catch(e) {
     resultado._errorMVD = e.message;
   }
 
   res.status(200).json(resultado);
 }
+
