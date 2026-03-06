@@ -80,17 +80,30 @@ export default async function handler(req, res) {
       const posiblePos = parseInt(lineas[i]);
       const posibleNum = lineas[i + 1];
 
-      // La posición debe ser 1..20 en orden, el número 3-4 dígitos
+      // La posición debe ser 1..20 en orden
       if (
         !isNaN(posiblePos) &&
         posiblePos === numeros.length + 1 &&
-        posibleNum &&
-        /^\d{3,4}$/.test(posibleNum)
+        posibleNum
       ) {
-        // Para Montevideo NO agregar padding, para el resto SÍ
-        const numeroFinal = esMontevideo ? posibleNum : posibleNum.padStart(4, '0');
-        numeros.push({ pos: posiblePos, num: numeroFinal });
-        i += 2;
+        // Para Montevideo: buscar EXACTAMENTE 4 dígitos, no aceptar 3
+        if (esMontevideo) {
+          if (/^\d{4}$/.test(posibleNum)) {
+            numeros.push({ pos: posiblePos, num: posibleNum });
+            i += 2;
+          } else {
+            // Si el número tiene 3 dígitos, puede estar incompleto, buscar en las siguientes líneas
+            i++;
+          }
+        } else {
+          // Para el resto: aceptar 3-4 dígitos con padding
+          if (/^\d{3,4}$/.test(posibleNum)) {
+            numeros.push({ pos: posiblePos, num: posibleNum.padStart(4, '0') });
+            i += 2;
+          } else {
+            i++;
+          }
+        }
       } else {
         // Si llegamos a una línea que no es número válido y ya tenemos algunos, parar
         if (numeros.length > 0 && isNaN(posiblePos)) break;
@@ -118,6 +131,61 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
+  // ── Parser específico para vivitusuerte.com (Montevideo) ─────────────────
+  function parsearVivitusuerte(html, sorteoNombre) {
+    // Convertir a texto plano
+    const texto = htmlATexto(html);
+    const lineas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+    // Buscar el sorteo (Matutina, Nocturna, etc.)
+    const sorteoIdx = lineas.findIndex(l => 
+      l.toLowerCase().includes(sorteoNombre.toLowerCase())
+    );
+
+    if (sorteoIdx === -1) return null;
+
+    // Buscar la fecha cerca del sorteo
+    let fecha = '';
+    for (let i = Math.max(0, sorteoIdx - 5); i < Math.min(lineas.length, sorteoIdx + 10); i++) {
+      if (/\d{2}-\d{2}-\d{4}/.test(lineas[i])) {
+        fecha = lineas[i].match(/\d{2}-\d{2}-\d{4}/)[0].replace(/-/g, '/');
+        break;
+      }
+    }
+
+    // Los números suelen estar después del nombre del sorteo
+    // Formato típico: posición (1-20) seguido de número de 4 dígitos
+    const numeros = [];
+    let i = sorteoIdx + 1;
+    let posEsperada = 1;
+
+    while (i < lineas.length && numeros.length < 20) {
+      const linea = lineas[i];
+      
+      // Buscar posición
+      if (linea === String(posEsperada)) {
+        // La siguiente línea debería ser el número de 4 dígitos
+        const siguienteLinea = lineas[i + 1];
+        if (siguienteLinea && /^\d{4}$/.test(siguienteLinea)) {
+          numeros.push({ pos: posEsperada, num: siguienteLinea });
+          posEsperada++;
+          i += 2;
+          continue;
+        }
+      }
+      
+      // Si encontramos otro sorteo o muchas líneas sin números, parar
+      if (linea.toLowerCase().match(/matutina|vespertina|nocturna|previa|primera/) && i > sorteoIdx + 5) {
+        break;
+      }
+      
+      i++;
+    }
+
+    if (numeros.length === 0) return null;
+    return { fecha: fecha || hoy, numeros };
+  }
+
   // ── Fetch página principal (todas las provincias menos Montevideo) ────────
   try {
     const html = await fetch('https://quinieladehoy.com.ar/quiniela', { headers })
@@ -136,14 +204,13 @@ export default async function handler(req, res) {
     resultado._errorAR = e.message;
   }
 
-  // ── Fetch Montevideo ──────────────────────────────────────────────────────
+  // ── Fetch Montevideo (desde vivitusuerte.com) ────────────────────────────
   try {
-    const html = await fetch('https://quinieladehoy.com.ar/quiniela/quiniela-montevideo', { headers })
+    const html = await fetch('https://vivitusuerte.com/pizarra/montevideo', { headers })
       .then(r => r.text());
-    const texto = htmlATexto(html);
 
     for (const sorteo of sorteos) {
-      const r = parsearTexto(texto, 'Quiniela Montevideo', sorteoNombres[sorteo], true); // true = esMontevideo
+      const r = parsearVivitusuerte(html, sorteoNombres[sorteo]);
       if (r && r.numeros.length > 0) {
         resultado.provincias.montevideo.sorteos[sorteo] = { fecha: r.fecha, numeros: r.numeros };
       }
@@ -154,3 +221,4 @@ export default async function handler(req, res) {
 
   res.status(200).json(resultado);
 }
+
