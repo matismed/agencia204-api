@@ -1,4 +1,4 @@
-// api/quiniela_er.js — Usando SOLO loteriasmundiales.com.ar para TODAS las provincias
+// api/quiniela_er.js — Versión MEJORADA con detección automática de códigos
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -7,47 +7,47 @@ export default async function handler(req, res) {
   const ahora = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
   const hoy   = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
 
-  // Mapeo de provincias a sus URLs y códigos en loteriasmundiales.com.ar
+  // Mapeo de provincias con múltiples códigos posibles para probar
   const provinciasConfig = {
     nacional: {
       nombre: 'Nacional',
       url: '/Quinielas/ciudad',
-      codigoQuiniela: 1  // idQ1_X_N01 para Ciudad/Nacional
+      codigosQuiniela: [1, 7, 9]  // Probar múltiples códigos
     },
     bsas: {
       nombre: 'Buenos Aires',
       url: '/Quinielas/buenos-aires',
-      codigoQuiniela: 2  // idQ2_X_N01 para Buenos Aires
+      codigosQuiniela: [2, 5]
     },
     cordoba: {
       nombre: 'Córdoba',
       url: '/Quinielas/cordoba',
-      codigoQuiniela: 4  // idQ4_X_N01 para Córdoba
+      codigosQuiniela: [4, 3]
     },
     santafe: {
       nombre: 'Santa Fe',
       url: '/Quinielas/santa-fe',
-      codigoQuiniela: 6  // idQ6_X_N01 para Santa Fe
+      codigosQuiniela: [6, 10]
     },
     entrerrios: {
       nombre: 'Entre Ríos',
       url: '/Quinielas/entre-rios',
-      codigoQuiniela: 8  // idQ8_X_N01 para Entre Ríos
+      codigosQuiniela: [8, 12]
     },
     montevideo: {
       nombre: 'Montevideo',
       url: '/Quinielas/uruguaya',
-      codigoQuiniela: 11 // idQ11_X_N01 para Uruguay
+      codigosQuiniela: [11]
     }
   };
 
-  // Mapeo de sorteos (ID de momento en loteriasmundiales)
+  // Mapeo de sorteos - TODOS los códigos posibles
   const sorteosConfig = {
-    previa: { nombre: 'Previa', codigoMomento: 5 },
-    primera: { nombre: 'Primera', codigoMomento: 0 },
-    matutina: { nombre: 'Matutina', codigoMomento: 1 },
-    vespertina: { nombre: 'Vespertina', codigoMomento: 2 },
-    nocturna: { nombre: 'Nocturna', codigoMomento: 3 }
+    previa: { nombre: 'Previa', codigosMomento: [5, 4] },
+    primera: { nombre: 'Primera', codigosMomento: [0, 2] },
+    matutina: { nombre: 'Matutina', codigosMomento: [1] },
+    vespertina: { nombre: 'Vespertina', codigosMomento: [2, 0] },
+    nocturna: { nombre: 'Nocturna', codigosMomento: [3] }
   };
 
   const sorteos = Object.keys(sorteosConfig);
@@ -68,8 +68,8 @@ export default async function handler(req, res) {
     'Referer': 'https://www.google.com/'
   };
 
-  // ── Parser universal para loteriasmundiales.com.ar ───────────────────────
-  function parsearLoteriasMundiales(html, codigoQuiniela) {
+  // ── Parser que prueba múltiples códigos ──────────────────────────────────
+  function parsearLoteriasMundialesFlexible(html, codigosQuiniela) {
     const resultados = {};
 
     // Extraer fecha del HTML
@@ -92,25 +92,46 @@ export default async function handler(req, res) {
     // Procesar cada sorteo
     for (const [sorteoKey, sorteoInfo] of Object.entries(sorteosConfig)) {
       const numeros = [];
-      const codigoMomento = sorteoInfo.codigoMomento;
+      let encontrado = false;
 
-      // Extraer los 20 números para este sorteo
-      // Formato: idQ{quiniela}_{momento}_N{posicion}
-      for (let pos = 1; pos <= 20; pos++) {
-        const posStr = pos.toString().padStart(2, '0');
-        const idPattern = `idQ${codigoQuiniela}_${codigoMomento}_N${posStr}`;
-        
-        // Buscar patrones:
-        // <td id="idQX_Y_NZZ" class="..."><b>NNNN</b></td>
-        // <td id="idQX_Y_NZZ">NNNN</td>
-        // <td id="idQX_Y_NZZ" class="...">NNNN</td>
-        const regex = new RegExp(`id="${idPattern}"[^>]*>(?:<b>)?\\s*([0-9]{3,4})\\s*(?:</b>)?<`, 'i');
-        const match = html.match(regex);
-        
-        if (match && match[1]) {
-          // Asegurar 4 dígitos (algunos pueden venir con 3)
-          const numero = match[1].trim().padStart(4, '0');
-          numeros.push({ pos: pos, num: numero });
+      // Probar con cada código de quiniela y momento
+      for (const codigoQuiniela of codigosQuiniela) {
+        if (encontrado) break;
+
+        for (const codigoMomento of sorteoInfo.codigosMomento) {
+          // Intentar extraer los 20 números
+          const numerosTemp = [];
+          
+          for (let pos = 1; pos <= 20; pos++) {
+            const posStr = pos.toString().padStart(2, '0');
+            const idPattern = `idQ${codigoQuiniela}_${codigoMomento}_N${posStr}`;
+            
+            // Buscar múltiples patrones
+            const patterns = [
+              `id="${idPattern}"[^>]*>(?:<b>)?\\s*([0-9]{3,4})\\s*(?:</b>)?<`,
+              `id='${idPattern}'[^>]*>(?:<b>)?\\s*([0-9]{3,4})\\s*(?:</b>)?<`,
+              `id=${idPattern}[^>]*>(?:<b>)?\\s*([0-9]{3,4})\\s*(?:</b>)?<`
+            ];
+
+            let match = null;
+            for (const pattern of patterns) {
+              const regex = new RegExp(pattern, 'i');
+              match = html.match(regex);
+              if (match) break;
+            }
+            
+            if (match && match[1]) {
+              const numero = match[1].trim().padStart(4, '0');
+              numerosTemp.push({ pos: pos, num: numero });
+            }
+          }
+
+          // Si encontramos al menos 10 números, consideramos que es válido
+          if (numerosTemp.length >= 10) {
+            numeros.push(...numerosTemp);
+            encontrado = true;
+            break;
+          }
         }
       }
 
@@ -130,24 +151,36 @@ export default async function handler(req, res) {
       const response = await fetch(url, { headers });
       
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        resultado[`_error_${provinciaKey}`] = `HTTP ${response.status}`;
+        continue;
       }
       
       const html = await response.text();
       
-      const resultadosProvincia = parsearLoteriasMundiales(html, config.codigoQuiniela);
+      // Intentar parsear con los códigos de quiniela
+      const resultadosProvincia = parsearLoteriasMundialesFlexible(html, config.codigosQuiniela);
 
       // Asignar los resultados a cada sorteo
       for (const [sorteoKey, sorteoData] of Object.entries(resultadosProvincia)) {
         resultado.provincias[provinciaKey].sorteos[sorteoKey] = sorteoData;
       }
 
+      // Si no encontramos ningún número, hacer diagnóstico
+      const totalNumeros = Object.values(resultadosProvincia).reduce((sum, s) => sum + s.numeros.length, 0);
+      if (totalNumeros === 0) {
+        // Buscar TODOS los IDs en el HTML para diagnóstico
+        const allIds = [...html.matchAll(/id="(idQ\d+_\d+_N\d+)"/gi)].map(m => m[1]);
+        if (allIds.length > 0) {
+          resultado[`_debug_${provinciaKey}`] = `IDs encontrados: ${allIds.slice(0, 5).join(', ')}...`;
+        } else {
+          resultado[`_debug_${provinciaKey}`] = 'No se encontraron IDs con formato idQX_Y_NZZ';
+        }
+      }
+
     } catch(e) {
       resultado[`_error_${provinciaKey}`] = e.message;
-      console.error(`Error fetching ${provinciaKey}:`, e.message);
     }
   }
 
   res.status(200).json(resultado);
 }
-
