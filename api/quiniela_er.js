@@ -1,4 +1,4 @@
-// api/quiniela_er.js — Mixto: quinieladehoy (5 provincias) + loteriasmundiales (Salta, Jujuy, Montevideo)
+// api/quiniela_er.js — Auto-detección de códigos para Salta y Jujuy
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -26,7 +26,6 @@ export default async function handler(req, res) {
     return horaActualMinutos >= horario.minutosDia;
   }
 
-  // Provincias desde quinieladehoy.com.ar
   const provinciasQuinielaHoy = [
     { key: 'nacional',   nombre: 'Nacional',     label: 'Quiniela Nacional' },
     { key: 'bsas',       nombre: 'Buenos Aires', label: 'Quiniela Buenos Aires' },
@@ -35,18 +34,17 @@ export default async function handler(req, res) {
     { key: 'entrerrios', nombre: 'Entre Ríos',   label: 'Quiniela Entre Rios' },
   ];
 
-  // Provincias desde loteriasmundiales.com.ar
+  // Probar códigos del 1 al 15 para cada provincia
   const provinciasLoteriasMundiales = [
-    { key: 'salta',      nombre: 'Salta',      url: '/Quinielas/salta',    codigoQuiniela: 12 },
-    { key: 'jujuy',      nombre: 'Jujuy',      url: '/Quinielas/jujuy',    codigoQuiniela: 13 },
-    { key: 'montevideo', nombre: 'Montevideo', url: '/Quinielas/uruguaya', codigoQuiniela: 11 }
+    { key: 'salta',      nombre: 'Salta',      url: '/Quinielas/salta',    codigosPosibles: [12, 7, 5, 9, 10, 13, 14, 15] },
+    { key: 'jujuy',      nombre: 'Jujuy',      url: '/Quinielas/jujuy',    codigosPosibles: [13, 8, 6, 9, 10, 11, 12, 14, 15] },
+    { key: 'montevideo', nombre: 'Montevideo', url: '/Quinielas/uruguaya', codigosPosibles: [11] }
   ];
 
   const todasProvincias = [...provinciasQuinielaHoy, ...provinciasLoteriasMundiales];
   const sorteos = ['previa','primera','matutina','vespertina','nocturna'];
   const sorteoNombres = { previa:'Previa', primera:'Primera', matutina:'Matutina', vespertina:'Vespertina', nocturna:'Nocturna' };
 
-  // Mapeo de códigos de sorteo en loteriasmundiales
   const codigosSorteos = {
     previa: 5,
     primera: 0,
@@ -59,7 +57,8 @@ export default async function handler(req, res) {
     actualizado: ahora, 
     fecha: hoy, 
     horaActual: `${horaActual.toString().padStart(2, '0')}:${minutoActual.toString().padStart(2, '0')}`,
-    provincias: {}
+    provincias: {},
+    _debug: {}
   };
   
   for (const p of todasProvincias) {
@@ -130,9 +129,10 @@ export default async function handler(req, res) {
     return { fecha, numeros };
   }
 
-  // ── Parser para loteriasmundiales.com.ar ─────────────────────────────────
-  function parsearLoteriasMundiales(html, codigoQuiniela) {
+  // ── Parser para loteriasmundiales (prueba múltiples códigos) ────────────
+  function parsearLoteriasMundialesConDeteccion(html, codigosPosibles) {
     const resultados = {};
+    let codigoEncontrado = null;
     
     let fecha = hoy;
     const fechaMatch = html.match(/(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/i);
@@ -150,41 +150,53 @@ export default async function handler(req, res) {
       }
     }
 
-    for (const [sorteoKey, codigoMomento] of Object.entries(codigosSorteos)) {
-      const numeros = [];
+    // Probar cada código posible
+    for (const codigoQuiniela of codigosPosibles) {
+      let encontroAlgo = false;
 
-      for (let pos = 1; pos <= 20; pos++) {
-        const posStr = pos.toString().padStart(2, '0');
-        const idPattern = `idQ${codigoQuiniela}_${codigoMomento}_N${posStr}`;
-        
-        const patterns = [
-          `id="${idPattern}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
-          `id="${idPattern}"[^>]*>\\s*([0-9]{3,4})\\s*<`,
-          `id='${idPattern}'[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
-          `id='${idPattern}'[^>]*>\\s*([0-9]{3,4})\\s*<`
-        ];
+      for (const [sorteoKey, codigoMomento] of Object.entries(codigosSorteos)) {
+        const numeros = [];
 
-        let numero = null;
-        for (const pattern of patterns) {
-          const regex = new RegExp(pattern, 'i');
-          const match = html.match(regex);
-          if (match && match[1]) {
-            numero = match[1].trim().padStart(4, '0');
-            break;
+        for (let pos = 1; pos <= 20; pos++) {
+          const posStr = pos.toString().padStart(2, '0');
+          const idPattern = `idQ${codigoQuiniela}_${codigoMomento}_N${posStr}`;
+          
+          const patterns = [
+            `id="${idPattern}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+            `id="${idPattern}"[^>]*>\\s*([0-9]{3,4})\\s*<`,
+            `id='${idPattern}'[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+            `id='${idPattern}'[^>]*>\\s*([0-9]{3,4})\\s*<`
+          ];
+
+          let numero = null;
+          for (const pattern of patterns) {
+            const regex = new RegExp(pattern, 'i');
+            const match = html.match(regex);
+            if (match && match[1]) {
+              numero = match[1].trim().padStart(4, '0');
+              break;
+            }
+          }
+
+          if (numero) {
+            numeros.push({ pos: pos, num: numero });
           }
         }
 
-        if (numero) {
-          numeros.push({ pos: pos, num: numero });
+        if (numeros.length > 0) {
+          resultados[sorteoKey] = { fecha, numeros };
+          encontroAlgo = true;
+          codigoEncontrado = codigoQuiniela;
         }
       }
 
-      if (numeros.length > 0) {
-        resultados[sorteoKey] = { fecha, numeros };
+      // Si encontró datos con este código, no seguir probando
+      if (encontroAlgo) {
+        break;
       }
     }
 
-    return resultados;
+    return { resultados, codigoEncontrado };
   }
 
   // ── Convertir HTML a texto plano ─────────────────────────────────────────
@@ -205,7 +217,7 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
-  // ── Fetch Argentina (Nacional, Bs As, Córdoba, Santa Fe, Entre Ríos) ────
+  // ── Fetch Argentina (quinieladehoy) ──────────────────────────────────────
   try {
     const response = await fetch('https://quinieladehoy.com.ar/quiniela', { headers });
     
@@ -244,19 +256,28 @@ export default async function handler(req, res) {
     resultado._errorAR = e.message;
   }
 
-  // ── Fetch Salta, Jujuy, Montevideo (desde loteriasmundiales) ────────────
+  // ── Fetch Salta, Jujuy, Montevideo (loteriasmundiales) ──────────────────
   for (const provincia of provinciasLoteriasMundiales) {
     try {
       const url = `https://www.loteriasmundiales.com.ar${provincia.url}`;
       const response = await fetch(url, { headers });
       
       if (!response.ok) {
-        resultado[`_error_${provincia.key}`] = `HTTP ${response.status}`;
+        resultado._debug[provincia.key] = `HTTP ${response.status}`;
         continue;
       }
       
       const html = await response.text();
-      const resultadosProvincia = parsearLoteriasMundiales(html, provincia.codigoQuiniela);
+      const { resultados: resultadosProvincia, codigoEncontrado } = parsearLoteriasMundialesConDeteccion(
+        html, 
+        provincia.codigosPosibles
+      );
+
+      if (codigoEncontrado) {
+        resultado._debug[provincia.key] = `Código detectado: Q${codigoEncontrado}`;
+      } else {
+        resultado._debug[provincia.key] = `No se encontró con códigos: ${provincia.codigosPosibles.join(', ')}`;
+      }
 
       for (const sorteo of sorteos) {
         if (sorteoYaOcurrio(sorteo)) {
@@ -273,10 +294,11 @@ export default async function handler(req, res) {
         }
       }
     } catch(e) {
-      resultado[`_error_${provincia.key}`] = e.message;
+      resultado._debug[provincia.key] = `Error: ${e.message}`;
     }
   }
 
   res.status(200).json(resultado);
 }
+
 
