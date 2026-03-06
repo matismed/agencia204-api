@@ -47,7 +47,7 @@ export default async function handler(req, res) {
   //
   // Separador entre bloques: "---" o el siguiente bloque de quiniela.
 
-  function parsearTexto(textoPlano, label, sorteoNombre) {
+  function parsearTexto(textoPlano, label, sorteoNombre, esMontevideo = false) {
     // Escapar caracteres especiales del label para regex
     const labelEsc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const sorteoEsc = sorteoNombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -87,7 +87,9 @@ export default async function handler(req, res) {
         posibleNum &&
         /^\d{3,4}$/.test(posibleNum)
       ) {
-        numeros.push({ pos: posiblePos, num: posibleNum.padStart(4, '0') });
+        // Para Montevideo NO agregar padding, para el resto SÍ
+        const numeroFinal = esMontevideo ? posibleNum : posibleNum.padStart(4, '0');
+        numeros.push({ pos: posiblePos, num: numeroFinal });
         i += 2;
       } else {
         // Si llegamos a una línea que no es número válido y ya tenemos algunos, parar
@@ -141,7 +143,7 @@ export default async function handler(req, res) {
     const texto = htmlATexto(html);
 
     for (const sorteo of sorteos) {
-      const r = parsearTexto(texto, 'Quiniela Montevideo', sorteoNombres[sorteo]);
+      const r = parsearTexto(texto, 'Quiniela Montevideo', sorteoNombres[sorteo], true); // true = esMontevideo
       if (r && r.numeros.length > 0) {
         resultado.provincias.montevideo.sorteos[sorteo] = { fecha: r.fecha, numeros: r.numeros };
       }
