@@ -1,4 +1,4 @@
-// api/quiniela_er.js — Auto-detección de códigos para Salta y Jujuy
+// api/quiniela_er.js — CORREGIDO: Jujuy con más códigos + Vespertina sin bloqueo
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -34,11 +34,26 @@ export default async function handler(req, res) {
     { key: 'entrerrios', nombre: 'Entre Ríos',   label: 'Quiniela Entre Rios' },
   ];
 
-  // Probar códigos del 1 al 15 para cada provincia
+  // Códigos ampliados - probar TODOS del 1 al 20
   const provinciasLoteriasMundiales = [
-    { key: 'salta',      nombre: 'Salta',      url: '/Quinielas/salta',    codigosPosibles: [12, 7, 5, 9, 10, 13, 14, 15] },
-    { key: 'jujuy',      nombre: 'Jujuy',      url: '/Quinielas/jujuy',    codigosPosibles: [13, 8, 6, 9, 10, 11, 12, 14, 15] },
-    { key: 'montevideo', nombre: 'Montevideo', url: '/Quinielas/uruguaya', codigosPosibles: [11] }
+    { 
+      key: 'salta', 
+      nombre: 'Salta', 
+      url: '/Quinielas/salta', 
+      codigosPosibles: [12, 7, 5, 9, 10, 1, 2, 3, 4, 6, 8, 11, 13, 14, 15, 16, 17, 18, 19, 20] 
+    },
+    { 
+      key: 'jujuy', 
+      nombre: 'Jujuy', 
+      url: '/Quinielas/jujuy', 
+      codigosPosibles: [13, 8, 6, 9, 10, 1, 2, 3, 4, 5, 7, 11, 12, 14, 15, 16, 17, 18, 19, 20] 
+    },
+    { 
+      key: 'montevideo', 
+      nombre: 'Montevideo', 
+      url: '/Quinielas/uruguaya', 
+      codigosPosibles: [11] 
+    }
   ];
 
   const todasProvincias = [...provinciasQuinielaHoy, ...provinciasLoteriasMundiales];
@@ -129,7 +144,7 @@ export default async function handler(req, res) {
     return { fecha, numeros };
   }
 
-  // ── Parser para loteriasmundiales (prueba múltiples códigos) ────────────
+  // ── Parser para loteriasmundiales (prueba todos los códigos) ────────────
   function parsearLoteriasMundialesConDeteccion(html, codigosPosibles) {
     const resultados = {};
     let codigoEncontrado = null;
@@ -152,7 +167,7 @@ export default async function handler(req, res) {
 
     // Probar cada código posible
     for (const codigoQuiniela of codigosPosibles) {
-      let encontroAlgo = false;
+      let totalNumerosEncontrados = 0;
 
       for (const [sorteoKey, codigoMomento] of Object.entries(codigosSorteos)) {
         const numeros = [];
@@ -185,13 +200,13 @@ export default async function handler(req, res) {
 
         if (numeros.length > 0) {
           resultados[sorteoKey] = { fecha, numeros };
-          encontroAlgo = true;
+          totalNumerosEncontrados += numeros.length;
           codigoEncontrado = codigoQuiniela;
         }
       }
 
-      // Si encontró datos con este código, no seguir probando
-      if (encontroAlgo) {
+      // Si encontró al menos 20 números (un sorteo completo), usar este código
+      if (totalNumerosEncontrados >= 20) {
         break;
       }
     }
@@ -222,7 +237,7 @@ export default async function handler(req, res) {
     const response = await fetch('https://quinieladehoy.com.ar/quiniela', { headers });
     
     if (!response.ok) {
-      resultado._errorAR = `HTTP ${response.status}`;
+      resultado._debug.quinieladehoy = `HTTP ${response.status}`;
     } else {
       const html = await response.text();
       const texto = htmlATexto(html);
@@ -230,15 +245,16 @@ export default async function handler(req, res) {
       for (const p of provinciasQuinielaHoy) {
         for (const sorteo of sorteos) {
           try {
-            if (sorteoYaOcurrio(sorteo)) {
-              const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
-              if (r && r.numeros.length > 0) {
-                resultado.provincias[p.key].sorteos[sorteo] = { 
-                  fecha: r.fecha, 
-                  numeros: r.numeros 
-                };
-              }
-            } else {
+            // IMPORTANTE: Siempre intentar parsear, sin importar la hora
+            // Esto permite que la vespertina aparezca si ya hay datos
+            const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
+            if (r && r.numeros.length > 0) {
+              resultado.provincias[p.key].sorteos[sorteo] = { 
+                fecha: r.fecha, 
+                numeros: r.numeros 
+              };
+            } else if (!sorteoYaOcurrio(sorteo)) {
+              // Solo marcar como pendiente si NO ocurrió Y no hay datos
               resultado.provincias[p.key].sorteos[sorteo] = {
                 fecha: hoy,
                 numeros: [],
@@ -253,7 +269,7 @@ export default async function handler(req, res) {
       }
     }
   } catch(e) {
-    resultado._errorAR = e.message;
+    resultado._debug.quinieladehoy = `Error: ${e.message}`;
   }
 
   // ── Fetch Salta, Jujuy, Montevideo (loteriasmundiales) ──────────────────
@@ -276,15 +292,15 @@ export default async function handler(req, res) {
       if (codigoEncontrado) {
         resultado._debug[provincia.key] = `Código detectado: Q${codigoEncontrado}`;
       } else {
-        resultado._debug[provincia.key] = `No se encontró con códigos: ${provincia.codigosPosibles.join(', ')}`;
+        resultado._debug[provincia.key] = `No se encontraron datos`;
       }
 
       for (const sorteo of sorteos) {
-        if (sorteoYaOcurrio(sorteo)) {
-          if (resultadosProvincia[sorteo]) {
-            resultado.provincias[provincia.key].sorteos[sorteo] = resultadosProvincia[sorteo];
-          }
-        } else {
+        // IMPORTANTE: Siempre asignar datos si existen
+        if (resultadosProvincia[sorteo]) {
+          resultado.provincias[provincia.key].sorteos[sorteo] = resultadosProvincia[sorteo];
+        } else if (!sorteoYaOcurrio(sorteo)) {
+          // Solo marcar como pendiente si NO ocurrió
           resultado.provincias[provincia.key].sorteos[sorteo] = {
             fecha: hoy,
             numeros: [],
@@ -300,5 +316,4 @@ export default async function handler(req, res) {
 
   res.status(200).json(resultado);
 }
-
 
