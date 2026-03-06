@@ -35,6 +35,8 @@ export default async function handler(req, res) {
     { key: 'cordoba',    nombre: 'Córdoba',      label: 'Quiniela Córdoba'      },
     { key: 'santafe',    nombre: 'Santa Fe',     label: 'Quiniela Santa Fe'     },
     { key: 'entrerrios', nombre: 'Entre Ríos',   label: 'Quiniela Entre Rios'   },
+    { key: 'salta',      nombre: 'Salta',        label: 'Quiniela Salta'        },
+    { key: 'jujuy',      nombre: 'Jujuy',        label: 'Quiniela Jujuy'        },
     { key: 'montevideo', nombre: 'Montevideo',   label: 'Quiniela Montevideo'   },
   ];
   const sorteos       = ['previa','primera','matutina','vespertina','nocturna'];
