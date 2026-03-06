@@ -1,4 +1,4 @@
-// api/quiniela_er.js — quinieladehoy.com (Argentina) + loteriasmundiales.com (Montevideo)
+// api/quiniela_er.js — Con control de horarios de sorteos
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -6,6 +6,28 @@ export default async function handler(req, res) {
 
   const ahora = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
   const hoy   = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+
+  // Obtener hora actual en Argentina
+  const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  const horaActual = ahoraArgentina.getHours();
+  const minutoActual = ahoraArgentina.getMinutes();
+  const horaActualMinutos = horaActual * 60 + minutoActual;
+
+  // Horarios de sorteos (en minutos desde medianoche)
+  const horariosSorteos = {
+    previa: { hora: 11, minuto: 15, minutosDia: 11 * 60 + 15 },      // 11:15
+    primera: { hora: 12, minuto: 0, minutosDia: 12 * 60 },           // 12:00
+    matutina: { hora: 14, minuto: 0, minutosDia: 14 * 60 },          // 14:00
+    vespertina: { hora: 17, minuto: 30, minutosDia: 17 * 60 + 30 },  // 17:30
+    nocturna: { hora: 21, minuto: 15, minutosDia: 21 * 60 + 15 }     // 21:15
+  };
+
+  // Función para verificar si el sorteo ya ocurrió hoy
+  function sorteoYaOcurrio(sorteo) {
+    const horario = horariosSorteos[sorteo];
+    if (!horario) return false;
+    return horaActualMinutos >= horario.minutosDia;
+  }
 
   const provincias = [
     { key: 'nacional',   nombre: 'Nacional',     label: 'Quiniela Nacional'     },
@@ -18,7 +40,13 @@ export default async function handler(req, res) {
   const sorteos       = ['previa','primera','matutina','vespertina','nocturna'];
   const sorteoNombres = { previa:'Previa', primera:'Primera', matutina:'Matutina', vespertina:'Vespertina', nocturna:'Nocturna' };
 
-  const resultado = { actualizado: ahora, fecha: hoy, provincias: {} };
+  const resultado = { 
+    actualizado: ahora, 
+    fecha: hoy, 
+    horaActual: `${horaActual.toString().padStart(2, '0')}:${minutoActual.toString().padStart(2, '0')}`,
+    provincias: {} 
+  };
+  
   for (const p of provincias) {
     resultado.provincias[p.key] = {
       nombre: p.nombre,
@@ -35,18 +63,15 @@ export default async function handler(req, res) {
 
   // ── Parser MEJORADO para quinieladehoy.com.ar (Argentina) ────────────────
   function parsearTexto(textoPlano, label, sorteoNombre) {
-    // Patrón más flexible para manejar espacios variables
     const labelPattern = label.replace(/\s+/g, '\\s*');
     const sorteoPattern = sorteoNombre.replace(/\s+/g, '\\s*');
 
-    // Intentar primero con espacio entre sorteo y fecha
     let inicioRe = new RegExp(
       labelPattern + '\\s*' + sorteoPattern + '\\s*(\\d{2}-\\d{2}-\\d{4})',
       'i'
     );
     let matchInicio = inicioRe.exec(textoPlano);
 
-    // Si no funciona, intentar sin espacio (fecha pegada)
     if (!matchInicio) {
       inicioRe = new RegExp(
         labelPattern + sorteoPattern + '(\\d{2}-\\d{2}-\\d{4})',
@@ -59,8 +84,6 @@ export default async function handler(req, res) {
 
     const fecha = matchInicio[1].replace(/-/g, '/');
     const desde = matchInicio.index + matchInicio[0].length;
-    
-    // Aumentar el tamaño del fragmento para asegurar capturar todos los números
     const fragmento = textoPlano.substring(desde, desde + 1200);
 
     const lineas = fragmento
@@ -75,13 +98,10 @@ export default async function handler(req, res) {
       const linea = lineas[i];
       const posiblePos = parseInt(linea);
 
-      // Verificar si es una posición válida (1-20) y consecutiva
       if (!isNaN(posiblePos) && posiblePos >= 1 && posiblePos <= 20 && posiblePos === numeros.length + 1) {
-        // La siguiente línea debería ser el número
         if (i + 1 < lineas.length) {
           const posibleNum = lineas[i + 1];
           
-          // Validar que sea un número de 3-4 dígitos
           if (/^\d{3,4}$/.test(posibleNum)) {
             numeros.push({ 
               pos: posiblePos, 
@@ -93,7 +113,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // Si encontramos "EOCZ" o inicio de otra quiniela, detener
       if (/EOCZ|Quiniela\s+(Nacional|Buenos\s+Aires|Córdoba|Santa\s+Fe|Entre\s+Rios)/i.test(linea) && numeros.length > 0) {
         break;
       }
@@ -108,13 +127,12 @@ export default async function handler(req, res) {
   // ── Parser MEJORADO para loteriasmundiales.com.ar (Montevideo) ───────────
   function parsearLoteriasMundiales(html) {
     const sorteoMap = {
-      'matutina': '1',   // idQ11_1_N01
-      'nocturna': '3'    // idQ11_3_N01
+      'matutina': '1',
+      'nocturna': '3'
     };
 
     const resultados = {};
 
-    // Extraer fecha
     let fecha = hoy;
     const fechaMatch = html.match(/(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/i);
     if (fechaMatch) {
@@ -134,17 +152,15 @@ export default async function handler(req, res) {
     for (const [sorteoNombre, sorteoId] of Object.entries(sorteoMap)) {
       const numeros = [];
 
-      // Extraer los 20 números con patrones más flexibles
       for (let pos = 1; pos <= 20; pos++) {
         const posStr = pos.toString().padStart(2, '0');
         const idPattern = `idQ11_${sorteoId}_N${posStr}`;
         
-        // Intentar múltiples patrones
         const patterns = [
-          `id="${idPattern}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,  // Con <b> tag
-          `id="${idPattern}"[^>]*>\\s*([0-9]{3,4})\\s*<`,            // Sin <b> tag
-          `id='${idPattern}'[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`, // Comillas simples
-          `id='${idPattern}'[^>]*>\\s*([0-9]{3,4})\\s*<`             // Comillas simples sin <b>
+          `id="${idPattern}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+          `id="${idPattern}"[^>]*>\\s*([0-9]{3,4})\\s*<`,
+          `id='${idPattern}'[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+          `id='${idPattern}'[^>]*>\\s*([0-9]{3,4})\\s*<`
         ];
 
         let numero = null;
@@ -201,15 +217,25 @@ export default async function handler(req, res) {
       for (const p of provincias.filter(p => p.key !== 'montevideo')) {
         for (const sorteo of sorteos) {
           try {
-            const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
-            if (r && r.numeros.length > 0) {
-              resultado.provincias[p.key].sorteos[sorteo] = { 
-                fecha: r.fecha, 
-                numeros: r.numeros 
+            // Solo procesar si el sorteo ya debería haber ocurrido
+            if (sorteoYaOcurrio(sorteo)) {
+              const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
+              if (r && r.numeros.length > 0) {
+                resultado.provincias[p.key].sorteos[sorteo] = { 
+                  fecha: r.fecha, 
+                  numeros: r.numeros 
+                };
+              }
+            } else {
+              // Sorteo aún no ha ocurrido - dejar vacío
+              resultado.provincias[p.key].sorteos[sorteo] = {
+                fecha: hoy,
+                numeros: [],
+                pendiente: true,
+                horaPrevista: `${horariosSorteos[sorteo].hora.toString().padStart(2, '0')}:${horariosSorteos[sorteo].minuto.toString().padStart(2, '0')}`
               };
             }
           } catch(err) {
-            // Error en un sorteo específico, continuar con los demás
             console.error(`Error parsing ${p.key} ${sorteo}:`, err);
           }
         }
@@ -229,12 +255,32 @@ export default async function handler(req, res) {
       const html = await response.text();
       const resultadosMVD = parsearLoteriasMundiales(html);
 
-      // Mapear matutina y nocturna a los sorteos
-      if (resultadosMVD.matutina) {
-        resultado.provincias.montevideo.sorteos.matutina = resultadosMVD.matutina;
+      // Mapear matutina solo si ya ocurrió
+      if (sorteoYaOcurrio('matutina')) {
+        if (resultadosMVD.matutina) {
+          resultado.provincias.montevideo.sorteos.matutina = resultadosMVD.matutina;
+        }
+      } else {
+        resultado.provincias.montevideo.sorteos.matutina = {
+          fecha: hoy,
+          numeros: [],
+          pendiente: true,
+          horaPrevista: '14:00'
+        };
       }
-      if (resultadosMVD.nocturna) {
-        resultado.provincias.montevideo.sorteos.nocturna = resultadosMVD.nocturna;
+
+      // Mapear nocturna solo si ya ocurrió
+      if (sorteoYaOcurrio('nocturna')) {
+        if (resultadosMVD.nocturna) {
+          resultado.provincias.montevideo.sorteos.nocturna = resultadosMVD.nocturna;
+        }
+      } else {
+        resultado.provincias.montevideo.sorteos.nocturna = {
+          fecha: hoy,
+          numeros: [],
+          pendiente: true,
+          horaPrevista: '21:15'
+        };
       }
     }
   } catch(e) {
@@ -243,3 +289,4 @@ export default async function handler(req, res) {
 
   res.status(200).json(resultado);
 }
+
