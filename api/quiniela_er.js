@@ -1,4 +1,4 @@
-// api/quiniela_er.js — VERSIÓN FINAL con nocturna corregida
+// api/quiniela_er.js — CON Salta y Jujuy desde quinieladehoy.com
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -26,12 +26,15 @@ export default async function handler(req, res) {
     return horaActualMinutos >= horario.minutosDia;
   }
 
+  // TODAS las provincias argentinas (incluyendo Salta y Jujuy)
   const provinciasQuinielaHoy = [
     { key: 'nacional',   nombre: 'Nacional',     label: 'Quiniela Nacional' },
     { key: 'bsas',       nombre: 'Buenos Aires', label: 'Quiniela Buenos Aires' },
     { key: 'cordoba',    nombre: 'Córdoba',      label: 'Quiniela Córdoba' },
     { key: 'santafe',    nombre: 'Santa Fe',     label: 'Quiniela Santa Fe' },
     { key: 'entrerrios', nombre: 'Entre Ríos',   label: 'Quiniela Entre Rios' },
+    { key: 'salta',      nombre: 'Salta',        label: 'Quiniela Salta' },
+    { key: 'jujuy',      nombre: 'Jujuy',        label: 'Quiniela Jujuy' },
   ];
 
   const provinciasLoteriasMundiales = [
@@ -111,7 +114,7 @@ export default async function handler(req, res) {
         }
       }
 
-      if (/EOCZ|Quiniela\s+(Nacional|Buenos\s+Aires|Córdoba|Santa\s+Fe|Entre\s+Rios)/i.test(linea) && numeros.length > 0) {
+      if (/EOCZ|Quiniela\s+(Nacional|Buenos\s+Aires|Córdoba|Santa\s+Fe|Entre\s+Rios|Salta|Jujuy)/i.test(linea) && numeros.length > 0) {
         break;
       }
       i++;
@@ -194,7 +197,7 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
-  // ── Fetch Argentina ──────────────────────────────────────────────────────
+  // ── Fetch Argentina (TODAS incluyendo Salta y Jujuy) ────────────────────
   try {
     const response = await fetch('https://quinieladehoy.com.ar/quiniela', { headers });
     
@@ -207,19 +210,17 @@ export default async function handler(req, res) {
       for (const p of provinciasQuinielaHoy) {
         for (const sorteo of sorteos) {
           try {
-            // LÓGICA CORREGIDA PARA NOCTURNA
+            // LÓGICA ESPECIAL PARA NOCTURNA
             if (sorteo === 'nocturna') {
               if (!sorteoYaOcurrio('nocturna')) {
-                // ANTES de las 21:15 → Mostrar pendiente
                 resultado.provincias[p.key].sorteos.nocturna = {
                   fecha: hoy, 
                   numeros: [], 
                   pendiente: true, 
                   horaPrevista: '21:15'
                 };
-                continue; // Saltar al siguiente sorteo
+                continue;
               } else {
-                // DESPUÉS de las 21:15 → Buscar datos
                 const r = parsearTexto(texto, p.label, sorteoNombres.nocturna);
                 if (r && r.numeros.length > 0) {
                   resultado.provincias[p.key].sorteos.nocturna = { 
@@ -227,17 +228,16 @@ export default async function handler(req, res) {
                     numeros: r.numeros 
                   };
                 } else {
-                  // Si no encuentra datos, dejar vacío (sorteo ya ocurrió pero sin datos)
                   resultado.provincias[p.key].sorteos.nocturna = {
                     fecha: hoy,
                     numeros: []
                   };
                 }
-                continue; // Saltar al siguiente sorteo
+                continue;
               }
             }
 
-            // PARA TODOS LOS DEMÁS SORTEOS (no nocturna)
+            // PARA TODOS LOS DEMÁS SORTEOS
             const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
             if (r && r.numeros.length > 0) {
               resultado.provincias[p.key].sorteos[sorteo] = { 
@@ -272,7 +272,6 @@ export default async function handler(req, res) {
       const html = await response.text();
       const resultadosMVD = parsearMontevideo(html);
 
-      // Matutina
       if (sorteoYaOcurrio('matutina')) {
         if (resultadosMVD.matutina) {
           resultado.provincias.montevideo.sorteos.matutina = resultadosMVD.matutina;
@@ -283,12 +282,10 @@ export default async function handler(req, res) {
         };
       }
 
-      // Nocturna
       if (sorteoYaOcurrio('nocturna')) {
         if (resultadosMVD.nocturna) {
           resultado.provincias.montevideo.sorteos.nocturna = resultadosMVD.nocturna;
         } else {
-          // Si ya pasó la hora pero no hay datos, dejar vacío
           resultado.provincias.montevideo.sorteos.nocturna = {
             fecha: hoy,
             numeros: []
@@ -306,3 +303,4 @@ export default async function handler(req, res) {
 
   res.status(200).json(resultado);
 }
+
