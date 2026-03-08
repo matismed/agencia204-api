@@ -1,4 +1,4 @@
-// api/quiniela_er.js — Con lógica para domingos (Salta y Jujuy)
+// api/quiniela_er.js — VERSIÓN FINAL con reglas completas por día
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -14,6 +14,8 @@ export default async function handler(req, res) {
   const diaSemana = ahoraArgentina.getDay(); // 0=Domingo, 1=Lunes, ..., 6=Sábado
 
   const esDomingo = diaSemana === 0;
+  const esSabado = diaSemana === 6;
+  const esLunesAViernes = diaSemana >= 1 && diaSemana <= 5;
 
   const horariosSorteos = {
     previa: { hora: 11, minuto: 15, minutosDia: 11 * 60 + 15 },
@@ -42,11 +44,13 @@ export default async function handler(req, res) {
   const sorteos = ['previa','primera','matutina','vespertina','nocturna'];
   const sorteoNombres = { previa:'Previa', primera:'Primera', matutina:'Matutina', vespertina:'Vespertina', nocturna:'Nocturna' };
 
+  const nombresDias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
   const resultado = { 
     actualizado: ahora, 
     fecha: hoy, 
     horaActual: `${horaActual.toString().padStart(2, '0')}:${minutoActual.toString().padStart(2, '0')}`,
-    diaSemana: esDomingo ? 'Domingo' : 'Lunes-Sábado',
+    diaSemana: nombresDias[diaSemana],
     provincias: {}
   };
   
@@ -97,7 +101,9 @@ export default async function handler(req, res) {
       if (mes) fecha = `${dia}/${mes}/${fechaMatch[3]}`;
     }
 
-    for (const [sorteoKey, codigo] of Object.entries({matutina:1, nocturna:3})) {
+    const sorteosMontevideo = { matutina: 1, nocturna: 3 };
+    
+    for (const [sorteoKey, codigo] of Object.entries(sorteosMontevideo)) {
       const numeros = [];
       for (let pos = 1; pos <= 20; pos++) {
         const id = `idQ11_${codigo}_N${pos.toString().padStart(2,'0')}`;
@@ -116,16 +122,47 @@ export default async function handler(req, res) {
       .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n');
   }
 
-  // Determinar qué sorteos tiene cada provincia según el día
-  function sorteosSoportados(provinciaKey, sorteo) {
-    // Salta y Jujuy los domingos SOLO tienen Primera y Matutina
-    if (esDomingo && (provinciaKey === 'salta' || provinciaKey === 'jujuy')) {
+  // ═══════════════════════════════════════════════════════════════════════
+  // REGLAS DE SORTEOS POR PROVINCIA Y DÍA
+  // ═══════════════════════════════════════════════════════════════════════
+  function sorteoDisponible(provinciaKey, sorteo) {
+    // DOMINGO: Salta, Jujuy, Entre Ríos → SOLO Primera y Matutina
+    if (esDomingo && (provinciaKey === 'salta' || provinciaKey === 'jujuy' || provinciaKey === 'entrerrios')) {
       return sorteo === 'primera' || sorteo === 'matutina';
     }
-    // Resto de provincias tienen todos los sorteos todos los días
-    return true;
+    
+    // Resto de provincias argentinas: todos los sorteos todos los días
+    if (provinciaKey !== 'montevideo') {
+      return true;
+    }
+
+    // MONTEVIDEO tiene reglas especiales:
+    // No tiene nunca Previa ni Vespertina
+    if (sorteo === 'previa' || sorteo === 'vespertina') {
+      return false;
+    }
+
+    // Lunes a Viernes: Matutina y Nocturna
+    if (esLunesAViernes) {
+      return sorteo === 'matutina' || sorteo === 'nocturna';
+    }
+
+    // Sábado: SOLO Nocturna
+    if (esSabado) {
+      return sorteo === 'nocturna';
+    }
+
+    // Domingo: NO tiene sorteos
+    if (esDomingo) {
+      return false;
+    }
+
+    return false;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // FETCH ARGENTINA
+  // ═══════════════════════════════════════════════════════════════════════
   try {
     const response = await fetch('https://quinieladehoy.com.ar/quiniela', { headers });
     if (response.ok) {
@@ -133,19 +170,17 @@ export default async function handler(req, res) {
       
       for (const p of provinciasQuinielaHoy) {
         for (const sorteo of sorteos) {
-          // Verificar si esta provincia tiene este sorteo hoy
-          if (!sorteosSoportados(p.key, sorteo)) {
-            // Este sorteo no existe hoy para esta provincia
+          // Verificar si este sorteo está disponible hoy para esta provincia
+          if (!sorteoDisponible(p.key, sorteo)) {
             resultado.provincias[p.key].sorteos[sorteo] = {
               fecha: hoy,
               numeros: [],
-              noDisponible: true,
-              razon: 'No hay sorteo los domingos'
+              noDisponible: true
             };
             continue;
           }
 
-          // Lógica especial para nocturna
+          // Lógica especial para nocturna (bloquear antes de las 21:15)
           if (sorteo === 'nocturna') {
             if (!sorteoYaOcurrio('nocturna')) {
               resultado.provincias[p.key].sorteos.nocturna = {
@@ -156,23 +191,16 @@ export default async function handler(req, res) {
               };
             } else {
               const r = parsearTexto(texto, p.label, sorteoNombres.nocturna);
-              if (r) {
-                resultado.provincias[p.key].sorteos.nocturna = r;
-              } else {
-                resultado.provincias[p.key].sorteos.nocturna = {
-                  fecha: hoy,
-                  numeros: []
-                };
-              }
+              resultado.provincias[p.key].sorteos.nocturna = r || { fecha: hoy, numeros: [] };
             }
             continue;
           }
 
           // Para el resto de sorteos
-          const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
-          if (r) {
-            resultado.provincias[p.key].sorteos[sorteo] = r;
-          } else if (!sorteoYaOcurrio(sorteo)) {
+          if (sorteoYaOcurrio(sorteo)) {
+            const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
+            resultado.provincias[p.key].sorteos[sorteo] = r || { fecha: hoy, numeros: [] };
+          } else {
             resultado.provincias[p.key].sorteos[sorteo] = {
               fecha: hoy, 
               numeros: [], 
@@ -187,24 +215,52 @@ export default async function handler(req, res) {
     resultado._errorAR = e.message;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // FETCH MONTEVIDEO
+  // ═══════════════════════════════════════════════════════════════════════
   try {
     const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/uruguaya', { headers });
     if (response.ok) {
       const resultadosMVD = parsearMontevideo(await response.text());
-      resultado.provincias.montevideo = resultado.provincias.montevideo || { nombre: 'Montevideo', sorteos: {} };
+      resultado.provincias.montevideo = { nombre: 'Montevideo', sorteos: {} };
       
-      for (const sorteo of ['matutina', 'nocturna']) {
-        if (sorteoYaOcurrio(sorteo)) {
-          if (resultadosMVD[sorteo]) {
-            resultado.provincias.montevideo.sorteos[sorteo] = resultadosMVD[sorteo];
-          }
-        } else {
+      for (const sorteo of sorteos) {
+        // Verificar disponibilidad
+        if (!sorteoDisponible('montevideo', sorteo)) {
           resultado.provincias.montevideo.sorteos[sorteo] = {
-            fecha: hoy, 
-            numeros: [], 
-            pendiente: true, 
-            horaPrevista: sorteo === 'matutina' ? '14:00' : '21:15'
+            fecha: hoy,
+            numeros: [],
+            noDisponible: true
           };
+          continue;
+        }
+
+        // Matutina (Lunes a Viernes)
+        if (sorteo === 'matutina') {
+          if (sorteoYaOcurrio('matutina')) {
+            resultado.provincias.montevideo.sorteos.matutina = resultadosMVD.matutina || { fecha: hoy, numeros: [] };
+          } else {
+            resultado.provincias.montevideo.sorteos.matutina = {
+              fecha: hoy, 
+              numeros: [], 
+              pendiente: true, 
+              horaPrevista: '14:00'
+            };
+          }
+        }
+
+        // Nocturna (Lunes a Sábado)
+        if (sorteo === 'nocturna') {
+          if (sorteoYaOcurrio('nocturna')) {
+            resultado.provincias.montevideo.sorteos.nocturna = resultadosMVD.nocturna || { fecha: hoy, numeros: [] };
+          } else {
+            resultado.provincias.montevideo.sorteos.nocturna = {
+              fecha: hoy, 
+              numeros: [], 
+              pendiente: true, 
+              horaPrevista: '21:15'
+            };
+          }
         }
       }
     }
@@ -214,3 +270,4 @@ export default async function handler(req, res) {
 
   res.status(200).json(resultado);
 }
+
