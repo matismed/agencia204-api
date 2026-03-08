@@ -1,4 +1,4 @@
-// api/quiniela_er.js — Versión OPTIMIZADA (sin timeout)
+// api/quiniela_er.js — Con lógica para domingos (Salta y Jujuy)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -11,6 +11,9 @@ export default async function handler(req, res) {
   const horaActual = ahoraArgentina.getHours();
   const minutoActual = ahoraArgentina.getMinutes();
   const horaActualMinutos = horaActual * 60 + minutoActual;
+  const diaSemana = ahoraArgentina.getDay(); // 0=Domingo, 1=Lunes, ..., 6=Sábado
+
+  const esDomingo = diaSemana === 0;
 
   const horariosSorteos = {
     previa: { hora: 11, minuto: 15, minutosDia: 11 * 60 + 15 },
@@ -43,6 +46,7 @@ export default async function handler(req, res) {
     actualizado: ahora, 
     fecha: hoy, 
     horaActual: `${horaActual.toString().padStart(2, '0')}:${minutoActual.toString().padStart(2, '0')}`,
+    diaSemana: esDomingo ? 'Domingo' : 'Lunes-Sábado',
     provincias: {}
   };
   
@@ -112,6 +116,16 @@ export default async function handler(req, res) {
       .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n');
   }
 
+  // Determinar qué sorteos tiene cada provincia según el día
+  function sorteosSoportados(provinciaKey, sorteo) {
+    // Salta y Jujuy los domingos SOLO tienen Primera y Matutina
+    if (esDomingo && (provinciaKey === 'salta' || provinciaKey === 'jujuy')) {
+      return sorteo === 'primera' || sorteo === 'matutina';
+    }
+    // Resto de provincias tienen todos los sorteos todos los días
+    return true;
+  }
+
   try {
     const response = await fetch('https://quinieladehoy.com.ar/quiniela', { headers });
     if (response.ok) {
@@ -119,16 +133,52 @@ export default async function handler(req, res) {
       
       for (const p of provinciasQuinielaHoy) {
         for (const sorteo of sorteos) {
-          if (sorteo === 'nocturna' && !sorteoYaOcurrio('nocturna')) {
-            resultado.provincias[p.key].sorteos.nocturna = { fecha: hoy, numeros: [], pendiente: true, horaPrevista: '21:15' };
-          } else {
-            const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
-            if (r) resultado.provincias[p.key].sorteos[sorteo] = r;
-            else if (!sorteoYaOcurrio(sorteo)) {
-              resultado.provincias[p.key].sorteos[sorteo] = { fecha: hoy, numeros: [], pendiente: true,
-                horaPrevista: `${horariosSorteos[sorteo].hora.toString().padStart(2,'0')}:${horariosSorteos[sorteo].minuto.toString().padStart(2,'0')}`
+          // Verificar si esta provincia tiene este sorteo hoy
+          if (!sorteosSoportados(p.key, sorteo)) {
+            // Este sorteo no existe hoy para esta provincia
+            resultado.provincias[p.key].sorteos[sorteo] = {
+              fecha: hoy,
+              numeros: [],
+              noDisponible: true,
+              razon: 'No hay sorteo los domingos'
+            };
+            continue;
+          }
+
+          // Lógica especial para nocturna
+          if (sorteo === 'nocturna') {
+            if (!sorteoYaOcurrio('nocturna')) {
+              resultado.provincias[p.key].sorteos.nocturna = {
+                fecha: hoy, 
+                numeros: [], 
+                pendiente: true, 
+                horaPrevista: '21:15'
               };
+            } else {
+              const r = parsearTexto(texto, p.label, sorteoNombres.nocturna);
+              if (r) {
+                resultado.provincias[p.key].sorteos.nocturna = r;
+              } else {
+                resultado.provincias[p.key].sorteos.nocturna = {
+                  fecha: hoy,
+                  numeros: []
+                };
+              }
             }
+            continue;
+          }
+
+          // Para el resto de sorteos
+          const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
+          if (r) {
+            resultado.provincias[p.key].sorteos[sorteo] = r;
+          } else if (!sorteoYaOcurrio(sorteo)) {
+            resultado.provincias[p.key].sorteos[sorteo] = {
+              fecha: hoy, 
+              numeros: [], 
+              pendiente: true,
+              horaPrevista: `${horariosSorteos[sorteo].hora.toString().padStart(2,'0')}:${horariosSorteos[sorteo].minuto.toString().padStart(2,'0')}`
+            };
           }
         }
       }
@@ -145,10 +195,16 @@ export default async function handler(req, res) {
       
       for (const sorteo of ['matutina', 'nocturna']) {
         if (sorteoYaOcurrio(sorteo)) {
-          if (resultadosMVD[sorteo]) resultado.provincias.montevideo.sorteos[sorteo] = resultadosMVD[sorteo];
+          if (resultadosMVD[sorteo]) {
+            resultado.provincias.montevideo.sorteos[sorteo] = resultadosMVD[sorteo];
+          }
         } else {
-          resultado.provincias.montevideo.sorteos[sorteo] = { fecha: hoy, numeros: [], pendiente: true, 
-            horaPrevista: sorteo === 'matutina' ? '14:00' : '21:15' };
+          resultado.provincias.montevideo.sorteos[sorteo] = {
+            fecha: hoy, 
+            numeros: [], 
+            pendiente: true, 
+            horaPrevista: sorteo === 'matutina' ? '14:00' : '21:15'
+          };
         }
       }
     }
