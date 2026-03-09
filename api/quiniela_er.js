@@ -1,4 +1,4 @@
-// api/quiniela_er.js — Con control de horarios de sorteos
+// api/quiniela_er.js — Con Salta y Jujuy desde loteriasmundiales.com.ar
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -7,22 +7,29 @@ export default async function handler(req, res) {
   const ahora = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
   const hoy   = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
 
-  // Obtener hora actual en Argentina
   const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
   const horaActual = ahoraArgentina.getHours();
   const minutoActual = ahoraArgentina.getMinutes();
   const horaActualMinutos = horaActual * 60 + minutoActual;
+  const diaSemana = ahoraArgentina.getDay();
 
-  // Horarios de sorteos (en minutos desde medianoche)
+  const esDomingo = diaSemana === 0;
+  const esSabado = diaSemana === 6;
+  const esLunesAViernes = diaSemana >= 1 && diaSemana <= 5;
+
+  const diaHoy = ahoraArgentina.getDate().toString().padStart(2, '0');
+  const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
+  const anioHoy = ahoraArgentina.getFullYear();
+  const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
+
   const horariosSorteos = {
-    previa: { hora: 11, minuto: 15, minutosDia: 11 * 60 + 15 },      // 11:15
-    primera: { hora: 12, minuto: 0, minutosDia: 12 * 60 },           // 12:00
-    matutina: { hora: 14, minuto: 0, minutosDia: 14 * 60 },          // 14:00
-    vespertina: { hora: 17, minuto: 30, minutosDia: 17 * 60 + 30 },  // 17:30
-    nocturna: { hora: 21, minuto: 15, minutosDia: 21 * 60 + 15 }     // 21:15
+    previa: { hora: 11, minuto: 15, minutosDia: 11 * 60 + 15 },
+    primera: { hora: 12, minuto: 0, minutosDia: 12 * 60 },
+    matutina: { hora: 14, minuto: 0, minutosDia: 14 * 60 },
+    vespertina: { hora: 17, minuto: 30, minutosDia: 17 * 60 + 30 },
+    nocturna: { hora: 21, minuto: 15, minutosDia: 21 * 60 + 15 }
   };
 
-  // Función para verificar si el sorteo ya ocurrió hoy
   function sorteoYaOcurrio(sorteo) {
     const horario = horariosSorteos[sorteo];
     if (!horario) return false;
@@ -35,6 +42,8 @@ export default async function handler(req, res) {
     { key: 'cordoba',    nombre: 'Córdoba',      label: 'Quiniela Córdoba'      },
     { key: 'santafe',    nombre: 'Santa Fe',     label: 'Quiniela Santa Fe'     },
     { key: 'entrerrios', nombre: 'Entre Ríos',   label: 'Quiniela Entre Rios'   },
+    { key: 'salta',      nombre: 'Salta',        label: 'Quiniela Salta'        },
+    { key: 'jujuy',      nombre: 'Jujuy',        label: 'Quiniela Jujuy'        },
     { key: 'montevideo', nombre: 'Montevideo',   label: 'Quiniela Montevideo'   },
   ];
   const sorteos       = ['previa','primera','matutina','vespertina','nocturna'];
@@ -61,7 +70,6 @@ export default async function handler(req, res) {
     'Referer': 'https://www.google.com/',
   };
 
-  // ── Parser MEJORADO para quinieladehoy.com.ar (Argentina) ────────────────
   function parsearTexto(textoPlano, label, sorteoNombre) {
     const labelPattern = label.replace(/\s+/g, '\\s*');
     const sorteoPattern = sorteoNombre.replace(/\s+/g, '\\s*');
@@ -124,16 +132,11 @@ export default async function handler(req, res) {
     return { fecha, numeros };
   }
 
-  // ── Parser MEJORADO para loteriasmundiales.com.ar (Montevideo) ───────────
-  function parsearLoteriasMundiales(html) {
-    const sorteoMap = {
-      'matutina': '1',
-      'nocturna': '3'
-    };
-
+  // Parser GENÉRICO para loteriasmundiales.com.ar
+  function parsearLoteriasMundiales(html, codigos) {
     const resultados = {};
-
     let fecha = hoy;
+    
     const fechaMatch = html.match(/(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/i);
     if (fechaMatch) {
       const meses = {
@@ -146,21 +149,25 @@ export default async function handler(req, res) {
       const anio = fechaMatch[3];
       if (mes) {
         fecha = `${dia}/${mes}/${anio}`;
+        const fechaNormalizada = fecha.replace(/-/g, '/');
+        if (fechaNormalizada !== fechaHoyFormato) {
+          return {};
+        }
       }
     }
 
-    for (const [sorteoNombre, sorteoId] of Object.entries(sorteoMap)) {
+    for (const [sorteoKey, config] of Object.entries(codigos)) {
       const numeros = [];
-
+      
       for (let pos = 1; pos <= 20; pos++) {
         const posStr = pos.toString().padStart(2, '0');
-        const idPattern = `idQ11_${sorteoId}_N${posStr}`;
+        const id = `idQ${config.quiniela}_${config.sorteo}_N${posStr}`;
         
         const patterns = [
-          `id="${idPattern}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
-          `id="${idPattern}"[^>]*>\\s*([0-9]{3,4})\\s*<`,
-          `id='${idPattern}'[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
-          `id='${idPattern}'[^>]*>\\s*([0-9]{3,4})\\s*<`
+          `id="${id}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+          `id="${id}"[^>]*>\\s*([0-9]{3,4})\\s*<`,
+          `id='${id}'[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+          `id='${id}'[^>]*>\\s*([0-9]{3,4})\\s*<`
         ];
 
         let numero = null;
@@ -174,19 +181,18 @@ export default async function handler(req, res) {
         }
 
         if (numero) {
-          numeros.push({ pos: pos, num: numero });
+          numeros.push({ pos, num: numero });
         }
       }
 
       if (numeros.length > 0) {
-        resultados[sorteoNombre] = { fecha, numeros };
+        resultados[sorteoKey] = { fecha, numeros };
       }
     }
 
     return resultados;
   }
 
-  // ── Convertir HTML a texto plano ─────────────────────────────────────────
   function htmlATexto(html) {
     return html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -204,7 +210,27 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
-  // ── Fetch Argentina (todas menos Montevideo) ─────────────────────────────
+  function sorteoDisponible(provinciaKey, sorteo) {
+    if (esDomingo && (provinciaKey === 'salta' || provinciaKey === 'jujuy' || provinciaKey === 'entrerrios')) {
+      return sorteo === 'primera' || sorteo === 'matutina';
+    }
+
+    if (provinciaKey === 'montevideo') {
+      if (sorteo === 'previa' || sorteo === 'vespertina' || sorteo === 'primera') {
+        return false;
+      }
+      if (esLunesAViernes || esSabado) {
+        return sorteo === 'matutina' || sorteo === 'nocturna';
+      }
+      if (esDomingo) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // ── Fetch Argentina (Nacional, Bs As, Córdoba, Santa Fe, Entre Ríos) ────
   try {
     const response = await fetch('https://quinieladehoy.com.ar/quiniela', { headers });
     
@@ -214,10 +240,9 @@ export default async function handler(req, res) {
       const html = await response.text();
       const texto = htmlATexto(html);
 
-      for (const p of provincias.filter(p => p.key !== 'montevideo')) {
+      for (const p of provincias.filter(p => !['montevideo', 'salta', 'jujuy'].includes(p.key))) {
         for (const sorteo of sorteos) {
           try {
-            // Solo procesar si el sorteo ya debería haber ocurrido
             if (sorteoYaOcurrio(sorteo)) {
               const r = parsearTexto(texto, p.label, sorteoNombres[sorteo]);
               if (r && r.numeros.length > 0) {
@@ -227,7 +252,6 @@ export default async function handler(req, res) {
                 };
               }
             } else {
-              // Sorteo aún no ha ocurrido - dejar vacío
               resultado.provincias[p.key].sorteos[sorteo] = {
                 fecha: hoy,
                 numeros: [],
@@ -245,42 +269,177 @@ export default async function handler(req, res) {
     resultado._errorAR = e.message;
   }
 
-  // ── Fetch Montevideo (desde loteriasmundiales.com.ar) ────────────────────
+  // ── Fetch SALTA desde loteriasmundiales.com.ar ───────────────────────────
+  try {
+    const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/salta', { headers });
+    
+    if (response.ok) {
+      const html = await response.text();
+      const codigosSalta = {
+        previa: { quiniela: 10, sorteo: 0 },
+        primera: { quiniela: 26, sorteo: 0 },
+        matutina: { quiniela: 27, sorteo: 0 },
+        vespertina: { quiniela: 23, sorteo: 0 },
+        nocturna: { quiniela: 20, sorteo: 0 }
+      };
+      
+      const resultadosSalta = parsearLoteriasMundiales(html, codigosSalta);
+
+      for (const sorteo of sorteos) {
+        if (!sorteoDisponible('salta', sorteo)) {
+          resultado.provincias.salta.sorteos[sorteo] = {
+            fecha: hoy,
+            numeros: [],
+            noDisponible: true
+          };
+          continue;
+        }
+
+        if (sorteo === 'nocturna') {
+          if (!sorteoYaOcurrio('nocturna')) {
+            resultado.provincias.salta.sorteos.nocturna = {
+              fecha: hoy,
+              numeros: [],
+              pendiente: true,
+              horaPrevista: '21:15'
+            };
+          } else {
+            resultado.provincias.salta.sorteos.nocturna = resultadosSalta.nocturna || { fecha: hoy, numeros: [] };
+          }
+          continue;
+        }
+
+        if (sorteoYaOcurrio(sorteo)) {
+          resultado.provincias.salta.sorteos[sorteo] = resultadosSalta[sorteo] || { fecha: hoy, numeros: [] };
+        } else {
+          resultado.provincias.salta.sorteos[sorteo] = {
+            fecha: hoy,
+            numeros: [],
+            pendiente: true,
+            horaPrevista: `${horariosSorteos[sorteo].hora.toString().padStart(2, '0')}:${horariosSorteos[sorteo].minuto.toString().padStart(2, '0')}`
+          };
+        }
+      }
+    }
+  } catch(e) {
+    resultado._errorSalta = e.message;
+  }
+
+  // ── Fetch JUJUY desde loteriasmundiales.com.ar ───────────────────────────
+  try {
+    const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/jujena', { headers });
+    
+    if (response.ok) {
+      const html = await response.text();
+      const codigosJujuy = {
+        primera: { quiniela: 26, sorteo: 0 },
+        matutina: { quiniela: 27, sorteo: 0 },
+        vespertina: { quiniela: 23, sorteo: 0 },
+        nocturna: { quiniela: 23, sorteo: 5 }
+      };
+      
+      const resultadosJujuy = parsearLoteriasMundiales(html, codigosJujuy);
+
+      for (const sorteo of sorteos) {
+        if (!sorteoDisponible('jujuy', sorteo)) {
+          resultado.provincias.jujuy.sorteos[sorteo] = {
+            fecha: hoy,
+            numeros: [],
+            noDisponible: true
+          };
+          continue;
+        }
+
+        // Jujuy no tiene "previa"
+        if (sorteo === 'previa') {
+          resultado.provincias.jujuy.sorteos.previa = {
+            fecha: hoy,
+            numeros: [],
+            noDisponible: true
+          };
+          continue;
+        }
+
+        if (sorteo === 'nocturna') {
+          if (!sorteoYaOcurrio('nocturna')) {
+            resultado.provincias.jujuy.sorteos.nocturna = {
+              fecha: hoy,
+              numeros: [],
+              pendiente: true,
+              horaPrevista: '21:15'
+            };
+          } else {
+            resultado.provincias.jujuy.sorteos.nocturna = resultadosJujuy.nocturna || { fecha: hoy, numeros: [] };
+          }
+          continue;
+        }
+
+        if (sorteoYaOcurrio(sorteo)) {
+          resultado.provincias.jujuy.sorteos[sorteo] = resultadosJujuy[sorteo] || { fecha: hoy, numeros: [] };
+        } else {
+          resultado.provincias.jujuy.sorteos[sorteo] = {
+            fecha: hoy,
+            numeros: [],
+            pendiente: true,
+            horaPrevista: `${horariosSorteos[sorteo].hora.toString().padStart(2, '0')}:${horariosSorteos[sorteo].minuto.toString().padStart(2, '0')}`
+          };
+        }
+      }
+    }
+  } catch(e) {
+    resultado._errorJujuy = e.message;
+  }
+
+  // ── Fetch MONTEVIDEO desde loteriasmundiales.com.ar ──────────────────────
   try {
     const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/uruguaya', { headers });
     
-    if (!response.ok) {
-      resultado._errorMVD = `HTTP ${response.status}`;
-    } else {
+    if (response.ok) {
       const html = await response.text();
-      const resultadosMVD = parsearLoteriasMundiales(html);
+      const codigosMontevideo = {
+        matutina: { quiniela: 11, sorteo: 1 },
+        nocturna: { quiniela: 11, sorteo: 3 }
+      };
+      
+      const resultadosMVD = parsearLoteriasMundiales(html, codigosMontevideo);
 
-      // Mapear matutina solo si ya ocurrió
-      if (sorteoYaOcurrio('matutina')) {
-        if (resultadosMVD.matutina) {
-          resultado.provincias.montevideo.sorteos.matutina = resultadosMVD.matutina;
+      for (const sorteo of sorteos) {
+        if (!sorteoDisponible('montevideo', sorteo)) {
+          resultado.provincias.montevideo.sorteos[sorteo] = {
+            fecha: hoy,
+            numeros: [],
+            noDisponible: true
+          };
+          continue;
         }
-      } else {
-        resultado.provincias.montevideo.sorteos.matutina = {
-          fecha: hoy,
-          numeros: [],
-          pendiente: true,
-          horaPrevista: '14:00'
-        };
-      }
 
-      // Mapear nocturna solo si ya ocurrió
-      if (sorteoYaOcurrio('nocturna')) {
-        if (resultadosMVD.nocturna) {
-          resultado.provincias.montevideo.sorteos.nocturna = resultadosMVD.nocturna;
+        if (sorteo === 'matutina') {
+          if (sorteoYaOcurrio('matutina')) {
+            resultado.provincias.montevideo.sorteos.matutina = resultadosMVD.matutina || { fecha: hoy, numeros: [] };
+          } else {
+            resultado.provincias.montevideo.sorteos.matutina = {
+              fecha: hoy,
+              numeros: [],
+              pendiente: true,
+              horaPrevista: '14:00'
+            };
+          }
+          continue;
         }
-      } else {
-        resultado.provincias.montevideo.sorteos.nocturna = {
-          fecha: hoy,
-          numeros: [],
-          pendiente: true,
-          horaPrevista: '21:15'
-        };
+
+        if (sorteo === 'nocturna') {
+          if (sorteoYaOcurrio('nocturna')) {
+            resultado.provincias.montevideo.sorteos.nocturna = resultadosMVD.nocturna || { fecha: hoy, numeros: [] };
+          } else {
+            resultado.provincias.montevideo.sorteos.nocturna = {
+              fecha: hoy,
+              numeros: [],
+              pendiente: true,
+              horaPrevista: '21:15'
+            };
+          }
+          continue;
+        }
       }
     }
   } catch(e) {
