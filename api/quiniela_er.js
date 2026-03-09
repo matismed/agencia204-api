@@ -1,4 +1,4 @@
-// api/quiniela_er.js — VERSIÓN FINAL desde vivitusuerte.com
+// api/quiniela_er.js — VERSIÓN MEJORADA con mejor compatibilidad
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -42,7 +42,6 @@ export default async function handler(req, res) {
     provincias: {}
   };
 
-  // Provincias a scrapear
   const provincias = [
     { key: 'nacional', url: '/pizarra/ciudad', nombre: 'Nacional' },
     { key: 'bsas', url: '/pizarra/buenos-aires', nombre: 'Buenos Aires' },
@@ -87,11 +86,11 @@ export default async function handler(req, res) {
     
     // Mapeo de data-pizarra-momento a nombre de sorteo
     const momentoMap = {
-      '5': 'previa',      // La Previa
-      '1': 'primera',     // Primera
-      '2': 'matutina',    // Matutina
-      '3': 'vespertina',  // Vespertina
-      '4': 'nocturna'     // Nocturna
+      '5': 'previa',
+      '1': 'primera',
+      '2': 'matutina',
+      '3': 'vespertina',
+      '4': 'nocturna'
     };
 
     for (const [momento, sorteoKey] of Object.entries(momentoMap)) {
@@ -102,24 +101,35 @@ export default async function handler(req, res) {
       if (tableMatch) {
         const tablaHTML = tableMatch[1];
         
-        // Extraer todos los números con clase "caja-resultado"
-        const numerosRegex = /<span[^>]*class="caja-resultado"[^>]*data-texto="momento_dato_(\d+)"[^>]*>(\d{4})<\/span>/g;
-        const numeros = [];
+        // Extraer TODOS los números de 4 dígitos que NO sean "----"
+        // Método 1: Con data-texto
+        let numeros = [];
+        const numerosRegex1 = /<span[^>]*class="caja-resultado"[^>]*data-texto="momento_dato_(\d+)"[^>]*>(\d{4})<\/span>/g;
         let match;
         
-        while ((match = numerosRegex.exec(tablaHTML)) !== null) {
+        while ((match = numerosRegex1.exec(tablaHTML)) !== null) {
           const posicion = parseInt(match[1]);
           const numero = match[2];
-          
-          // Verificar que no sea "----" (pendiente)
           if (numero && numero !== '----' && /^\d{4}$/.test(numero)) {
             numeros.push({ pos: posicion, num: numero });
           }
         }
         
+        // Método 2: Si el método 1 no funcionó, buscar CUALQUIER número de 4 dígitos en orden
+        if (numeros.length === 0) {
+          const numerosRegex2 = /<span[^>]*class="caja-resultado"[^>]*>(\d{4})<\/span>/g;
+          let pos = 1;
+          while ((match = numerosRegex2.exec(tablaHTML)) !== null && pos <= 20) {
+            const numero = match[1];
+            if (numero && numero !== '----' && /^\d{4}$/.test(numero)) {
+              numeros.push({ pos, num: numero });
+              pos++;
+            }
+          }
+        }
+        
         // Solo guardar si tenemos los 20 números
         if (numeros.length === 20) {
-          // Ordenar por posición
           numeros.sort((a, b) => a.pos - b.pos);
           resultados[sorteoKey] = { fecha: hoy, numeros };
         }
@@ -182,4 +192,3 @@ export default async function handler(req, res) {
 
   res.status(200).json(resultado);
 }
-
