@@ -1,4 +1,4 @@
-// api/quiniela_er.js — DIAGNÓSTICO COMPLETO - Todos los códigos
+// api/quiniela_er.js — VERSIÓN FINAL DEFINITIVA
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -7,12 +7,146 @@ export default async function handler(req, res) {
   const ahora = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
   const hoy   = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
 
-  const resultado = {
-    actualizado: ahora,
-    fecha: hoy,
-    mensaje: "Diagnóstico completo - Mostrando TODOS los códigos encontrados",
+  const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  const horaActual = ahoraArgentina.getHours();
+  const minutoActual = ahoraArgentina.getMinutes();
+  const horaActualMinutos = horaActual * 60 + minutoActual;
+  const diaSemana = ahoraArgentina.getDay();
+
+  const esDomingo = diaSemana === 0;
+  const esSabado = diaSemana === 6;
+  const esLunesAViernes = diaSemana >= 1 && diaSemana <= 5;
+
+  const diaHoy = ahoraArgentina.getDate().toString().padStart(2, '0');
+  const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
+  const anioHoy = ahoraArgentina.getFullYear();
+  const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
+
+  const horariosSorteos = {
+    previa: { hora: 11, minuto: 15, minutosDia: 11 * 60 + 15 },
+    primera: { hora: 12, minuto: 0, minutosDia: 12 * 60 },
+    matutina: { hora: 14, minuto: 0, minutosDia: 14 * 60 },
+    vespertina: { hora: 17, minuto: 30, minutosDia: 17 * 60 + 30 },
+    nocturna: { hora: 21, minuto: 15, minutosDia: 21 * 60 + 15 }
+  };
+
+  function sorteoYaOcurrio(sorteo) {
+    const horario = horariosSorteos[sorteo];
+    if (!horario) return false;
+    return horaActualMinutos >= horario.minutosDia;
+  }
+
+  // MAPEO CORRECTO basado en el análisis de códigos
+  const provincias = [
+    { 
+      key: 'nacional', 
+      nombre: 'Nacional', 
+      url: '/Quinielas/ciudad',
+      codigos: {
+        previa: { quiniela: 6, sorteo: 0 },      // Q6_0 = 8310
+        primera: { quiniela: 14, sorteo: 1 },    // Q14_1 = 9410
+        matutina: { quiniela: 26, sorteo: 1 },   // Q26_1 = 1161
+        vespertina: { quiniela: 27, sorteo: 1 }, // Q27_1 = 8228
+        nocturna: { quiniela: 27, sorteo: 5 }    // Q27_5 = 5070
+      }
+    },
+    { 
+      key: 'bsas', 
+      nombre: 'Buenos Aires', 
+      url: '/Quinielas/buenos-aires',
+      codigos: {
+        previa: { quiniela: 6, sorteo: 0 },      // Q6_0 = 8310
+        primera: { quiniela: 15, sorteo: 0 },    // Q15_0 = 2954
+        matutina: { quiniela: 26, sorteo: 0 },   // Q26_0 = 8549
+        vespertina: { quiniela: 27, sorteo: 0 }, // Q27_0 = 4070
+        nocturna: { quiniela: 27, sorteo: 5 }    // Q27_5 = 5070
+      }
+    },
+    { 
+      key: 'cordoba', 
+      nombre: 'Córdoba', 
+      url: '/Quinielas/cordoba',
+      codigos: {
+        previa: { quiniela: 6, sorteo: 0 },      // Q6_0 = 8310
+        matutina: { quiniela: 26, sorteo: 0 },   // Q26_0 = 8549
+        vespertina: { quiniela: 27, sorteo: 0 }, // Q27_0 = 4070
+        nocturna: { quiniela: 27, sorteo: 5 }    // Q27_5 = 5070
+      }
+    },
+    { 
+      key: 'santafe', 
+      nombre: 'Santa Fe', 
+      url: '/Quinielas/santa-fe',
+      codigos: {
+        primera: { quiniela: 15, sorteo: 0 },    // Q15_0 = 2954
+        matutina: { quiniela: 26, sorteo: 0 },   // Q26_0 = 8549
+        vespertina: { quiniela: 27, sorteo: 0 }, // Q27_0 = 4070
+        nocturna: { quiniela: 27, sorteo: 5 }    // Q27_5 = 5070
+      }
+    },
+    { 
+      key: 'entrerrios', 
+      nombre: 'Entre Ríos', 
+      url: '/Quinielas/entre-rios',
+      codigos: {
+        previa: { quiniela: 14, sorteo: 0 },     // Q14_0 = 2186
+        primera: { quiniela: 15, sorteo: 0 },    // Q15_0 = 2954
+        matutina: { quiniela: 26, sorteo: 0 },   // Q26_0 = 8549
+        vespertina: { quiniela: 27, sorteo: 0 }, // Q27_0 = 4070
+        nocturna: { quiniela: 27, sorteo: 5 }    // Q27_5 = 5070
+      }
+    },
+    { 
+      key: 'salta', 
+      nombre: 'Salta', 
+      url: '/Quinielas/salta',
+      codigos: {
+        previa: { quiniela: 10, sorteo: 0 },     // Q10_0 = 6388
+        primera: { quiniela: 26, sorteo: 0 },    // Q26_0 = 8549
+        matutina: { quiniela: 27, sorteo: 0 },   // Q27_0 = 4070
+        vespertina: { quiniela: 23, sorteo: 0 }, // Q23_0 = 9430
+        nocturna: { quiniela: 20, sorteo: 0 }    // Q20_0 = 0052
+      }
+    },
+    { 
+      key: 'jujuy', 
+      nombre: 'Jujuy', 
+      url: '/Quinielas/jujena',
+      codigos: {
+        primera: { quiniela: 26, sorteo: 0 },    // Q26_0 = 8549
+        matutina: { quiniela: 27, sorteo: 0 },   // Q27_0 = 4070
+        vespertina: { quiniela: 23, sorteo: 0 }, // Q23_0 = 9430
+        nocturna: { quiniela: 23, sorteo: 5 }    // Q23_5 = 3770
+      }
+    },
+    { 
+      key: 'montevideo', 
+      nombre: 'Montevideo', 
+      url: '/Quinielas/uruguaya',
+      codigos: {
+        matutina: { quiniela: 11, sorteo: 1 },   // Q11_1 = 1701
+        nocturna: { quiniela: 11, sorteo: 3 }    // Q11_3 (nocturna)
+      }
+    }
+  ];
+
+  const sorteos = ['previa','primera','matutina','vespertina','nocturna'];
+  const nombresDias = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+  const resultado = { 
+    actualizado: ahora, 
+    fecha: hoy, 
+    horaActual: `${horaActual.toString().padStart(2, '0')}:${minutoActual.toString().padStart(2, '0')}`,
+    diaSemana: nombresDias[diaSemana],
     provincias: {}
   };
+  
+  for (const p of provincias) {
+    resultado.provincias[p.key] = {
+      nombre: p.nombre,
+      sorteos: Object.fromEntries(sorteos.map(s => [s, { fecha: hoy, numeros: [] }]))
+    };
+  }
 
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -20,131 +154,141 @@ export default async function handler(req, res) {
     'Accept-Language': 'es-AR,es;q=0.9'
   };
 
-  function extraerPrimerNumero(html, codigoQuiniela, codigoSorteo) {
-    const id = `idQ${codigoQuiniela}_${codigoSorteo}_N01`;
-    const patterns = [
-      `id="${id}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
-      `id="${id}"[^>]*>\\s*([0-9]{3,4})\\s*<`
-    ];
-
-    for (const pattern of patterns) {
-      const regex = new RegExp(pattern, 'i');
-      const match = html.match(regex);
-      if (match && match[1]) {
-        return match[1].trim().padStart(4, '0');
-      }
-    }
-    return null;
+  function esFechaHoy(fechaStr) {
+    const fechaNormalizada = fechaStr.replace(/-/g, '/');
+    return fechaNormalizada === fechaHoyFormato;
   }
 
-  // Configuración de provincias
-  const provincias = [
-    { 
-      key: 'nacional', 
-      nombre: 'Nacional (Ciudad)',
-      url: '/Quinielas/ciudad', 
-      codigosQuiniela: [6, 14, 15, 26, 27],
-      codigosSorteo: [0, 1, 5]
-    },
-    { 
-      key: 'bsas', 
-      nombre: 'Buenos Aires',
-      url: '/Quinielas/buenos-aires', 
-      codigosQuiniela: [6, 15, 26, 27],
-      codigosSorteo: [0, 5]
-    },
-    { 
-      key: 'cordoba', 
-      nombre: 'Córdoba',
-      url: '/Quinielas/cordoba', 
-      codigosQuiniela: [6, 26, 27],
-      codigosSorteo: [0, 5]
-    },
-    { 
-      key: 'santafe', 
-      nombre: 'Santa Fe',
-      url: '/Quinielas/santa-fe', 
-      codigosQuiniela: [15, 26, 27],
-      codigosSorteo: [0, 5]
-    },
-    { 
-      key: 'entrerrios', 
-      nombre: 'Entre Ríos',
-      url: '/Quinielas/entre-rios', 
-      codigosQuiniela: [14, 15, 26, 27],
-      codigosSorteo: [0, 5]
-    },
-    { 
-      key: 'salta', 
-      nombre: 'Salta',
-      url: '/Quinielas/salta', 
-      codigosQuiniela: [10, 20, 23, 26, 27],
-      codigosSorteo: [0]
-    },
-    { 
-      key: 'jujuy', 
-      nombre: 'Jujuy',
-      url: '/Quinielas/jujena', 
-      codigosQuiniela: [23, 26, 27],
-      codigosSorteo: [0, 5]
-    },
-    { 
-      key: 'montevideo', 
-      nombre: 'Montevideo',
-      url: '/Quinielas/uruguaya', 
-      codigosQuiniela: [11],
-      codigosSorteo: [1, 3]
+  function parsearLoteriasMundiales(html, codigos) {
+    const resultados = {};
+    let fecha = hoy;
+    
+    const fechaMatch = html.match(/(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/i);
+    if (fechaMatch) {
+      const meses = {'enero':'01','febrero':'02','marzo':'03','abril':'04','mayo':'05','junio':'06',
+        'julio':'07','agosto':'08','septiembre':'09','octubre':'10','noviembre':'11','diciembre':'12'};
+      const dia = fechaMatch[1].padStart(2, '0');
+      const mes = meses[fechaMatch[2].toLowerCase()];
+      const anio = fechaMatch[3];
+      if (mes) {
+        fecha = `${dia}/${mes}/${anio}`;
+        if (!esFechaHoy(fecha)) {
+          return {};
+        }
+      }
     }
-  ];
 
-  for (const prov of provincias) {
+    for (const [sorteoKey, config] of Object.entries(codigos)) {
+      const numeros = [];
+      
+      for (let pos = 1; pos <= 20; pos++) {
+        const posStr = pos.toString().padStart(2, '0');
+        const id = `idQ${config.quiniela}_${config.sorteo}_N${posStr}`;
+        
+        const patterns = [
+          `id="${id}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+          `id="${id}"[^>]*>\\s*([0-9]{3,4})\\s*<`,
+          `id='${id}'[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+          `id='${id}'[^>]*>\\s*([0-9]{3,4})\\s*<`
+        ];
+
+        let numero = null;
+        for (const pattern of patterns) {
+          const regex = new RegExp(pattern, 'i');
+          const match = html.match(regex);
+          if (match && match[1]) {
+            numero = match[1].trim().padStart(4, '0');
+            break;
+          }
+        }
+
+        if (numero) {
+          numeros.push({ pos, num: numero });
+        }
+      }
+
+      if (numeros.length > 0) {
+        resultados[sorteoKey] = { fecha, numeros };
+      }
+    }
+
+    return resultados;
+  }
+
+  function sorteoDisponible(provinciaKey, sorteo, tieneCodigoEnFuente) {
+    if (!tieneCodigoEnFuente) {
+      return false;
+    }
+
+    if (esDomingo && (provinciaKey === 'salta' || provinciaKey === 'jujuy' || provinciaKey === 'entrerrios')) {
+      return sorteo === 'primera' || sorteo === 'matutina';
+    }
+
+    if (provinciaKey === 'montevideo') {
+      if (sorteo === 'previa' || sorteo === 'vespertina' || sorteo === 'primera') {
+        return false;
+      }
+      if (esLunesAViernes || esSabado) {
+        return sorteo === 'matutina' || sorteo === 'nocturna';
+      }
+      if (esDomingo) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  for (const provincia of provincias) {
     try {
-      const response = await fetch(`https://www.loteriasmundiales.com.ar${prov.url}`, { headers });
+      const response = await fetch(`https://www.loteriasmundiales.com.ar${provincia.url}`, { headers });
       
       if (response.ok) {
         const html = await response.text();
-        
-        resultado.provincias[prov.key] = {
-          nombre: prov.nombre,
-          url: prov.url,
-          codigos: {}
-        };
+        const resultadosProv = parsearLoteriasMundiales(html, provincia.codigos);
 
-        // Probar todas las combinaciones posibles
-        for (const codQuiniela of prov.codigosQuiniela) {
-          for (const codSorteo of prov.codigosSorteo) {
-            const cabeza = extraerPrimerNumero(html, codQuiniela, codSorteo);
-            
-            if (cabeza) {
-              const clave = `Q${codQuiniela}_${codSorteo}`;
-              resultado.provincias[prov.key].codigos[clave] = cabeza;
+        for (const sorteo of sorteos) {
+          const tieneCodigoEnFuente = provincia.codigos.hasOwnProperty(sorteo);
+          
+          if (!sorteoDisponible(provincia.key, sorteo, tieneCodigoEnFuente)) {
+            resultado.provincias[provincia.key].sorteos[sorteo] = {
+              fecha: hoy,
+              numeros: [],
+              noDisponible: true
+            };
+            continue;
+          }
+
+          if (sorteo === 'nocturna') {
+            if (!sorteoYaOcurrio('nocturna')) {
+              resultado.provincias[provincia.key].sorteos.nocturna = {
+                fecha: hoy, 
+                numeros: [], 
+                pendiente: true, 
+                horaPrevista: '21:15'
+              };
+            } else {
+              resultado.provincias[provincia.key].sorteos.nocturna = resultadosProv.nocturna || { fecha: hoy, numeros: [] };
             }
+            continue;
+          }
+
+          if (sorteoYaOcurrio(sorteo)) {
+            resultado.provincias[provincia.key].sorteos[sorteo] = resultadosProv[sorteo] || { fecha: hoy, numeros: [] };
+          } else {
+            resultado.provincias[provincia.key].sorteos[sorteo] = {
+              fecha: hoy, 
+              numeros: [], 
+              pendiente: true,
+              horaPrevista: `${horariosSorteos[sorteo].hora.toString().padStart(2,'0')}:${horariosSorteos[sorteo].minuto.toString().padStart(2,'0')}`
+            };
           }
         }
       }
-    } catch (error) {
-      resultado.provincias[prov.key] = { 
-        nombre: prov.nombre,
-        error: error.message 
-      };
+    } catch(e) {
+      resultado[`_error_${provincia.key}`] = e.message;
     }
   }
-
-  // Instrucciones para el usuario
-  resultado.instrucciones = {
-    mensaje: "Compara estos resultados con quinieladehoy.com",
-    pasos: [
-      "1. Ve a https://quinieladehoy.com/quiniela",
-      "2. Busca la Quiniela de la Ciudad y anota las cabezas de cada sorteo",
-      "3. Busca en este JSON qué código (Q6_0, Q14_1, etc.) tiene la misma cabeza",
-      "4. Comparte el mapeo correcto"
-    ],
-    ejemplo: {
-      "Si en quinieladehoy.com ves": "Ciudad Previa = 9921",
-      "Y en este JSON encuentras": "Q6_0 = 9921",
-      "Entonces": "Previa usa el código Q6_0"
-    }
-  };
 
   res.status(200).json(resultado);
 }
