@@ -55,7 +55,7 @@ export default async function handler(req, res) {
   }
 
   // URLs a probar para Ciudad/Nacional
-  const urlsAPro bar = [
+  const urlsAProbar = [
     'ciudad',
     'Ciudad',
     'ciudad-buenos-aires',
@@ -71,7 +71,7 @@ export default async function handler(req, res) {
     'Nacional'
   ];
 
-  for (const urlVariante of urlsAPro bar) {
+  for (const urlVariante of urlsAProbar) {
     const url = `https://www.loteriasmundiales.com.ar/Quinielas/${urlVariante}`;
     
     try {
