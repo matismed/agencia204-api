@@ -1,12 +1,12 @@
-// api/quiniela_er.js — DIAGNÓSTICO COMPLETO de todas las provincias
+// api/quiniela_er.js — DIAGNÓSTICO para encontrar Ciudad/Nacional
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
   const resultado = {
-    mensaje: "Detectando códigos de quiniela para TODAS las provincias en loteriasmundiales.com",
-    provincias: {}
+    mensaje: "Buscando quiniela de la Ciudad en loteriasmundiales.com",
+    pruebas: {}
   };
 
   const headers = {
@@ -15,22 +15,8 @@ export default async function handler(req, res) {
     'Accept-Language': 'es-AR,es;q=0.9'
   };
 
-  // Lista de provincias a probar
-  const provincias = [
-    { key: 'nacional', urls: ['nacional', 'Nacional'] },
-    { key: 'bsas', urls: ['buenos-aires', 'Buenos-Aires', 'buenosaires'] },
-    { key: 'cordoba', urls: ['cordoba', 'Cordoba', 'córdoba'] },
-    { key: 'santafe', urls: ['santa-fe', 'Santa-Fe', 'santafe'] },
-    { key: 'entrerrios', urls: ['entre-rios', 'Entre-Rios', 'entrerios'] },
-    { key: 'salta', urls: ['salta', 'Salta'] },
-    { key: 'jujuy', urls: ['jujuy', 'Jujuy', 'jujena'] },
-    { key: 'montevideo', urls: ['uruguaya', 'Uruguaya', 'uruguay'] }
-  ];
-
   function detectarCodigos(html) {
     const codigos = {};
-    
-    // Buscar patrones como idQ12_1_N01, idQ5_0_N03, etc.
     const regex = /idQ(\d+)_(\d+)_N(\d+)/g;
     let match;
     
@@ -68,66 +54,66 @@ export default async function handler(req, res) {
     return null;
   }
 
-  // Probar cada provincia
-  for (const prov of provincias) {
-    resultado.provincias[prov.key] = {
-      urlsProbadas: [],
-      urlFuncional: null,
-      codigos: null,
-      ejemploNumeros: null
-    };
+  // URLs a probar para Ciudad/Nacional
+  const urlsAPro bar = [
+    'ciudad',
+    'Ciudad',
+    'ciudad-buenos-aires',
+    'Ciudad-Buenos-Aires',
+    'ciudad-de-buenos-aires',
+    'caba',
+    'CABA',
+    'capital',
+    'Capital',
+    'capital-federal',
+    'Capital-Federal',
+    'nacional',
+    'Nacional'
+  ];
 
-    for (const urlVariante of prov.urls) {
-      const url = `https://www.loteriasmundiales.com.ar/Quinielas/${urlVariante}`;
+  for (const urlVariante of urlsAPro bar) {
+    const url = `https://www.loteriasmundiales.com.ar/Quinielas/${urlVariante}`;
+    
+    try {
+      const response = await fetch(url, { headers });
+      const html = await response.text();
       
-      try {
-        const response = await fetch(url, { headers });
-        const html = await response.text();
+      const info = {
+        url: url,
+        status: response.status,
+        funciona: response.status === 200,
+        tamañoHTML: html.length
+      };
+
+      if (response.status === 200) {
+        const codigos = detectarCodigos(html);
+        const codigosCount = Object.keys(codigos).length;
         
-        const info = {
-          url: url,
-          status: response.status,
-          funciona: response.status === 200,
-          tamañoHTML: html.length
-        };
-
-        if (response.status === 200) {
-          const codigos = detectarCodigos(html);
-          const codigosCount = Object.keys(codigos).length;
+        if (codigosCount > 0) {
+          info.codigosEncontrados = codigos;
+          info.totalCodigos = codigosCount;
           
-          if (codigosCount > 0) {
-            info.codigosEncontrados = codigos;
-            info.totalCodigos = codigosCount;
-            
-            // Extraer números de ejemplo para cada código
-            info.ejemplos = {};
-            for (const [codQuiniela, sorteos] of Object.entries(codigos)) {
-              info.ejemplos[`Q${codQuiniela}`] = {};
-              for (const codSorteo of Object.keys(sorteos)) {
-                const numero = extraerPrimerNumero(html, codQuiniela, codSorteo);
-                if (numero) {
-                  info.ejemplos[`Q${codQuiniela}`][`sorteo_${codSorteo}`] = numero;
-                }
+          // Extraer números de ejemplo
+          info.ejemplos = {};
+          for (const [codQuiniela, sorteos] of Object.entries(codigos)) {
+            info.ejemplos[`Q${codQuiniela}`] = {};
+            for (const codSorteo of Object.keys(sorteos)) {
+              const numero = extraerPrimerNumero(html, codQuiniela, codSorteo);
+              if (numero) {
+                info.ejemplos[`Q${codQuiniela}`][`sorteo_${codSorteo}`] = numero;
               }
-            }
-
-            // Guardar como URL funcional
-            if (!resultado.provincias[prov.key].urlFuncional) {
-              resultado.provincias[prov.key].urlFuncional = url;
-              resultado.provincias[prov.key].codigos = codigos;
-              resultado.provincias[prov.key].ejemploNumeros = info.ejemplos;
             }
           }
         }
-
-        resultado.provincias[prov.key].urlsProbadas.push(info);
-        
-      } catch (error) {
-        resultado.provincias[prov.key].urlsProbadas.push({
-          url: url,
-          error: error.message
-        });
       }
+
+      resultado.pruebas[urlVariante] = info;
+      
+    } catch (error) {
+      resultado.pruebas[urlVariante] = {
+        url: url,
+        error: error.message
+      };
     }
   }
 
