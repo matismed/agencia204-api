@@ -1,4 +1,4 @@
-// api/quiniela_er.js — VERSIÓN FINAL DE PRODUCCIÓN
+// api/quiniela_er.js — VERSIÓN FINAL DE PRODUCCIÓN.
 // Códigos correctos identificados automáticamente para Salta y Jujuy
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
