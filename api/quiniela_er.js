@@ -1,12 +1,16 @@
-// DIAGNÓSTICO DETALLADO - Ver TODOS los códigos de Salta y Jujuy
+// DIAGNÓSTICO EXHAUSTIVO - Códigos Q1-50, Sorteos 0-15
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Códigos completos de Salta y Jujuy con cabezas",
     salta: {},
-    jujuy: {}
+    jujuy: {},
+    busqueda: {
+      salta_primera_3583: null,
+      jujuy_primera_4242: null,
+      jujuy_matutina_6149: null
+    }
   };
 
   const headers = {
@@ -32,17 +36,20 @@ export default async function handler(req, res) {
     return null;
   }
 
-  // SALTA - Probar códigos del 1 al 30 con sorteos 0 al 10
+  // SALTA
   try {
     const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/salta', { headers });
     if (response.ok) {
       const html = await response.text();
       
-      for (let q = 1; q <= 30; q++) {
-        for (let s = 0; s <= 10; s++) {
+      for (let q = 1; q <= 50; q++) {
+        for (let s = 0; s <= 15; s++) {
           const cabeza = extraerCabeza(html, q, s);
           if (cabeza) {
             resultado.salta[`Q${q}_${s}`] = cabeza;
+            if (cabeza === '3583') {
+              resultado.busqueda.salta_primera_3583 = `Q${q}_${s}`;
+            }
           }
         }
       }
@@ -51,17 +58,23 @@ export default async function handler(req, res) {
     resultado.salta.error = e.message;
   }
 
-  // JUJUY - Probar códigos del 1 al 30 con sorteos 0 al 10
+  // JUJUY
   try {
     const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/jujena', { headers });
     if (response.ok) {
       const html = await response.text();
       
-      for (let q = 1; q <= 30; q++) {
-        for (let s = 0; s <= 10; s++) {
+      for (let q = 1; q <= 50; q++) {
+        for (let s = 0; s <= 15; s++) {
           const cabeza = extraerCabeza(html, q, s);
           if (cabeza) {
             resultado.jujuy[`Q${q}_${s}`] = cabeza;
+            if (cabeza === '4242') {
+              resultado.busqueda.jujuy_primera_4242 = `Q${q}_${s}`;
+            }
+            if (cabeza === '6149') {
+              resultado.busqueda.jujuy_matutina_6149 = `Q${q}_${s}`;
+            }
           }
         }
       }
@@ -70,24 +83,6 @@ export default async function handler(req, res) {
     resultado.jujuy.error = e.message;
   }
 
-  // Añadir guía de referencia
-  resultado.referencia = {
-    salta: {
-      previa_esperada: "----",
-      primera_esperada: "3583",
-      matutina_esperada: "----",
-      vespertina_esperada: "----",
-      nocturna_esperada: "----"
-    },
-    jujuy: {
-      previa_esperada: "no_disponible",
-      primera_esperada: "4242", 
-      matutina_esperada: "6149",
-      vespertina_esperada: "----",
-      nocturna_esperada: "----"
-    },
-    instrucciones: "Busca en los códigos qué Q_S tiene la cabeza esperada"
-  };
-
   res.status(200).json(resultado);
 }
+
