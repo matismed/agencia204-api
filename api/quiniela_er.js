@@ -1,186 +1,132 @@
-// DIAGNÓSTICO POR HORARIOS - Identificar códigos Q según horario del sorteo
+// api/quiniela_er.js — VERSIÓN OPTIMIZADA
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
-  const resultado = {
-    mensaje: "Identificación de códigos Q de Salta/Jujuy por HORARIO",
-    salta: {
-      sorteos_por_horario: {},
-      todos_horarios_encontrados: [],
-      fragmentos_html: {}
-    },
-    jujuy: {
-      sorteos_por_horario: {},
-      todos_horarios_encontrados: [],
-      fragmentos_html: {}
-    }
+  const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  const hoy = ahoraArgentina.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+  const horaActualMinutos = ahoraArgentina.getHours() * 60 + ahoraArgentina.getMinutes();
+  const diaSemana = ahoraArgentina.getDay();
+
+  const diaHoy = ahoraArgentina.getDate().toString().padStart(2, '0');
+  const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
+  const anioHoy = ahoraArgentina.getFullYear();
+  const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
+
+  const horariosSorteos = {
+    previa: { hora: 10, minuto: 15, minutosDia: 10 * 60 + 15 },
+    primera: { hora: 12, minuto: 0, minutosDia: 12 * 60 },
+    matutina: { hora: 15, minuto: 0, minutosDia: 15 * 60 },
+    vespertina: { hora: 18, minuto: 0, minutosDia: 18 * 60 },
+    nocturna: { hora: 21, minuto: 15, minutosDia: 21 * 60 + 15 }
   };
 
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'text/html,application/xhtml+xml',
-    'Accept-Language': 'es-AR,es;q=0.9'
+  const provincias = [
+    { key: 'nacional',   nombre: 'Nacional',     label: 'Quiniela Nacional'     },
+    { key: 'bsas',       nombre: 'Buenos Aires', label: 'Quiniela Buenos Aires' },
+    { key: 'cordoba',    nombre: 'Córdoba',      label: 'Quiniela Córdoba'      },
+    { key: 'santafe',    nombre: 'Santa Fe',     label: 'Quiniela Santa Fe'     },
+    { key: 'entrerrios', nombre: 'Entre Ríos',   label: 'Quiniela Entre Rios'   },
+    { key: 'salta',      nombre: 'Salta',        label: 'Quiniela Salta'        },
+    { key: 'jujuy',      nombre: 'Jujuy',        label: 'Quiniela Jujuy'        },
+    { key: 'montevideo', nombre: 'Montevideo',   label: 'Quiniela Montevideo'   },
+  ];
+
+  const sorteos = ['previa', 'primera', 'matutina', 'vespertina', 'nocturna'];
+  const sorteoNombres = { previa: 'Previa', primera: 'Primera', matutina: 'Matutina', vespertina: 'Vespertina', nocturna: 'Nocturna' };
+
+  let resultado = {
+    actualizado: ahoraArgentina.toLocaleString('es-AR'),
+    fecha: hoy,
+    provincias: {}
   };
 
-  function buscarCodigoPorHorario(html, horario) {
-    // Buscar el horario en el HTML y encontrar el código Q más cercano
-    const regexHorario = new RegExp(horario.replace(':', ':?'), 'gi');
-    const matchHorario = regexHorario.exec(html);
-    
-    if (!matchHorario) return null;
+  provincias.forEach(p => {
+    resultado.provincias[p.key] = { nombre: p.nombre, sorteos: {} };
+  });
 
-    // Buscar el código Q después del horario (los primeros 800 caracteres)
-    const fragmento = html.substring(matchHorario.index, matchHorario.index + 800);
-    const regexCodigo = /idQ(\d+)_(\d+)_N01[^>]*>\s*(?:<b>\s*)?(\d{3,4})/i;
-    const matchCodigo = fragmento.match(regexCodigo);
+  const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
 
-    if (matchCodigo) {
-      return {
-        quiniela: parseInt(matchCodigo[1]),
-        sorteo: parseInt(matchCodigo[2]),
-        codigo: `Q${matchCodigo[1]}_${matchCodigo[2]}`,
-        cabeza: matchCodigo[3].padStart(4, '0'),
-        posicion_horario: matchHorario.index,
-        fragmento: fragmento.substring(0, 400)
-      };
-    }
+  // --- FUNCIONES DE PARSEO MEJORADAS ---
 
-    return null;
-  }
-
-  function extraerTodosLosHorarios(html) {
-    const horarios = [];
-    const regexHorarios = /(\d{1,2}):?(\d{2})?\s*(Hs?\.?|hs?\.?|horas?)?/gi;
-    let match;
-    
-    while ((match = regexHorarios.exec(html)) !== null) {
-      const hora = match[1].padStart(2, '0');
-      const minuto = match[2] ? match[2].padStart(2, '0') : '00';
-      const horarioFormato = `${hora}:${minuto}`;
-      
-      // Guardar contexto
-      const inicio = Math.max(0, match.index - 100);
-      const fin = Math.min(html.length, match.index + 300);
-      
-      horarios.push({
-        horario: horarioFormato,
-        posicion: match.index,
-        contexto: html.substring(inicio, fin).replace(/\s+/g, ' ')
-      });
-    }
-    
-    return horarios;
-  }
-
-  // SALTA
-  try {
-    const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/salta', { headers });
-    if (response.ok) {
-      const html = await response.text();
-      
-      // Mapeo de horarios a sorteos
-      const horariosEsperados = {
-        '11:30': 'primera',
-        '11.30': 'primera',
-        '14:00': 'matutina',
-        '14.00': 'matutina',
-        '15:30': 'matutina',
-        '15.30': 'matutina',
-        '17:30': 'vespertina',
-        '17.30': 'vespertina',
-        '19:30': 'vespertina',
-        '19.30': 'vespertina',
-        '21:00': 'nocturna',
-        '21.00': 'nocturna',
-        '21:15': 'nocturna',
-        '21.15': 'nocturna',
-        '22:30': 'nocturna',
-        '22.30': 'nocturna'
-      };
-
-      // Buscar por cada horario
-      for (const [horario, sorteo] of Object.entries(horariosEsperados)) {
-        const info = buscarCodigoPorHorario(html, horario);
-        if (info && !resultado.salta.sorteos_por_horario[sorteo]) {
-          resultado.salta.sorteos_por_horario[sorteo] = {
-            horario: horario,
-            ...info
-          };
-          resultado.salta.fragmentos_html[sorteo] = info.fragmento;
+  function parsearLoteriasMundiales(html, codigos) {
+    const rLocal = {};
+    for (const [sorteoKey, config] of Object.entries(codigos)) {
+      const numeros = [];
+      // Buscamos los 20 números
+      for (let pos = 1; pos <= 20; pos++) {
+        const posStr = pos.toString().padStart(2, '0');
+        // Regex flexible para capturar el número dentro del ID específico
+        const regex = new RegExp(`id=["']idQ${config.quiniela}_${config.sorteo}_N${posStr}["'][^>]*>\\s*(?:<b>)?\\s*([0-9]{1,4})\\s*(?:<\\/b>)?\\s*<`, 'i');
+        const match = html.match(regex);
+        if (match && match[1]) {
+          numeros.push({ pos, num: match[1].padStart(4, '0') });
         }
       }
-
-      // Extraer TODOS los horarios encontrados
-      resultado.salta.todos_horarios_encontrados = extraerTodosLosHorarios(html).slice(0, 20);
+      if (numeros.length > 0) rLocal[sorteoKey] = { fecha: hoy, numeros };
     }
-  } catch(e) {
-    resultado.salta.error = e.message;
+    return rLocal;
   }
 
-  // JUJUY
-  try {
-    const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/jujena', { headers });
-    if (response.ok) {
-      const html = await response.text();
-      
-      // Mapeo de horarios a sorteos
-      const horariosEsperados = {
-        '12:00': 'primera',
-        '12.00': 'primera',
-        '14:00': 'matutina',
-        '14.00': 'matutina',
-        '15:30': 'matutina',
-        '15.30': 'matutina',
-        '17:30': 'vespertina',
-        '17.30': 'vespertina',
-        '19:30': 'vespertina',
-        '19.30': 'vespertina',
-        '21:00': 'nocturna',
-        '21.00': 'nocturna',
-        '21:15': 'nocturna',
-        '21.15': 'nocturna',
-        '22:30': 'nocturna',
-        '22.30': 'nocturna'
-      };
+  // --- LÓGICA DE CARGA ---
 
-      // Buscar por cada horario
-      for (const [horario, sorteo] of Object.entries(horariosEsperados)) {
-        const info = buscarCodigoPorHorario(html, horario);
-        if (info && !resultado.jujuy.sorteos_por_horario[sorteo]) {
-          resultado.jujuy.sorteos_por_horario[sorteo] = {
-            horario: horario,
-            ...info
+  try {
+    // 1. SALTA
+    const resSalta = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/salta', { headers });
+    const htmlSalta = await resSalta.text();
+    const dataSalta = parsearLoteriasMundiales(htmlSalta, {
+      previa: { quiniela: 10, sorteo: 0 },
+      primera: { quiniela: 26, sorteo: 0 },
+      matutina: { quiniela: 27, sorteo: 0 },
+      vespertina: { quiniela: 23, sorteo: 0 },
+      nocturna: { quiniela: 20, sorteo: 0 }
+    });
+
+    // 2. JUJUY
+    const resJujuy = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/jujena', { headers });
+    const htmlJujuy = await resJujuy.text();
+    const dataJujuy = parsearLoteriasMundiales(htmlJujuy, {
+      primera: { quiniela: 23, sorteo: 5 },
+      matutina: { quiniela: 26, sorteo: 5 },
+      vespertina: { quiniela: 23, sorteo: 0 },
+      nocturna: { quiniela: 26, sorteo: 0 }
+    });
+
+    // 3. MONTEVIDEO
+    const resMVD = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/uruguaya', { headers });
+    const htmlMVD = await resMVD.text();
+    const dataMVD = parsearLoteriasMundiales(htmlMVD, {
+      matutina: { quiniela: 11, sorteo: 1 },
+      nocturna: { quiniela: 11, sorteo: 3 }
+    });
+
+    // Llenar el objeto de resultados con validación de horarios
+    for (const p of provincias) {
+      for (const s of sorteos) {
+        let datosSorteo = null;
+        
+        if (p.key === 'salta') datosSorteo = dataSalta[s];
+        if (p.key === 'jujuy') datosSorteo = dataJujuy[s];
+        if (p.key === 'montevideo') datosSorteo = dataMVD[s];
+
+        if (datosSorteo) {
+          resultado.provincias[p.key].sorteos[s] = datosSorteo;
+        } else {
+          const pasoHora = horaActualMinutos >= horariosSorteos[s].minutosDia;
+          resultado.provincias[p.key].sorteos[s] = {
+            fecha: hoy,
+            numeros: [],
+            estado: pasoHora ? "No disponible / En carga" : "Pendiente",
+            horaPrevista: `${horariosSorteos[s].hora}:${horariosSorteos[s].minuto.toString().padStart(2,'0')}`
           };
-          resultado.jujuy.fragmentos_html[sorteo] = info.fragmento;
         }
       }
-
-      // Extraer TODOS los horarios encontrados
-      resultado.jujuy.todos_horarios_encontrados = extraerTodosLosHorarios(html).slice(0, 20);
     }
-  } catch(e) {
-    resultado.jujuy.error = e.message;
-  }
 
-  // Guía de interpretación
-  resultado.guia = {
-    mapeo_esperado: {
-      salta: {
-        primera: "11:30 Hs",
-        matutina: "14:00-15:30 Hs",
-        vespertina: "17:30-19:30 Hs",
-        nocturna: "21:00-22:30 Hs"
-      },
-      jujuy: {
-        primera: "12:00 Hs",
-        matutina: "14:00-15:30 Hs",
-        vespertina: "17:30-19:30 Hs",
-        nocturna: "21:00-22:30 Hs"
-      }
-    },
-    instrucciones: "Revisar 'sorteos_por_horario' para ver qué código Q corresponde a cada horario"
-  };
+  } catch (error) {
+    resultado.error = error.message;
+  }
 
   res.status(200).json(resultado);
 }
