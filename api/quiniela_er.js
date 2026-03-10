@@ -1,5 +1,6 @@
-// api/quiniela_er.js — VERSIÓN FINAL DE PRODUCCIÓN.
-// Códigos correctos identificados automáticamente para Salta y Jujuy
+// api/quiniela_er.js — VERSIÓN FINAL CORREGIDA POR HORARIOS
+// Salta: NO tiene Previa, códigos correctos por horario
+// Jujuy: NO tiene Previa
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -185,6 +186,12 @@ export default async function handler(req, res) {
       }
     }
 
+    // SALTA NO TIENE PREVIA
+    if (provinciaKey === 'salta' && sorteo === 'previa') {
+      return false;
+    }
+
+    // JUJUY NO TIENE PREVIA
     if (provinciaKey === 'jujuy' && sorteo === 'previa') {
       return false;
     }
@@ -248,23 +255,21 @@ export default async function handler(req, res) {
 
   // ════════════════════════════════════════════════════════════════════════
   // FETCH LOTERIASMUNDIALES.COM - SALTA
-  // Códigos identificados automáticamente:
-  // Previa: Q10_0 = 3583
-  // Primera: Q26_0 = 9149
-  // Matutina: Q27_0 = 5269
-  // Vespertina: Q23_0 = 0370
-  // Nocturna: Q20_0 = 9916
+  // CÓDIGOS CORRECTOS IDENTIFICADOS POR HORARIO:
+  // 11:30 Hs → Primera = Q10_0 (3583) ✓
+  // 14:00 Hs → Matutina = Q10_1 (6739) ✓
+  // 17:30-19:30 Hs → Vespertina = Q?_? (pendiente identificar)
+  // 21:00-22:30 Hs → Nocturna = Q?_? (pendiente identificar)
   // ════════════════════════════════════════════════════════════════════════
   try {
     const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/salta', { headers });
     if (response.ok) {
       const html = await response.text();
       const codigos = {
-        previa: { quiniela: 10, sorteo: 0 },
-        primera: { quiniela: 26, sorteo: 0 },
-        matutina: { quiniela: 27, sorteo: 0 },
-        vespertina: { quiniela: 23, sorteo: 0 },
-        nocturna: { quiniela: 20, sorteo: 0 }
+        primera: { quiniela: 10, sorteo: 0 },     // 11:30 Hs = 3583 ✓
+        matutina: { quiniela: 10, sorteo: 1 },    // 14:00 Hs = 6739 ✓
+        vespertina: { quiniela: 10, sorteo: 2 },  // 17:30-19:30 Hs (tentativo)
+        nocturna: { quiniela: 10, sorteo: 3 }     // 21:00-22:30 Hs (tentativo)
       };
       const resultadosSalta = parsearLoteriasMundiales(html, codigos);
 
@@ -310,23 +315,21 @@ export default async function handler(req, res) {
 
   // ════════════════════════════════════════════════════════════════════════
   // FETCH LOTERIASMUNDIALES.COM - JUJUY
-  // Códigos identificados automáticamente:
-  // Previa: NO DISPONIBLE (Jujuy no tiene Previa)
-  // Primera: Q23_5 = 4242
-  // Matutina: Q26_5 = 3297
-  // Vespertina: Q23_0 = 0370
-  // Nocturna: Q26_0 = 9149
-  // NOTA: Q27_0 = 5269 podría ser Nocturna alternativa
+  // CÓDIGOS IDENTIFICADOS POR HORARIO:
+  // 12:00 Hs → Primera = Q?_? (pendiente identificar)
+  // 14:00 Hs → Matutina = Q26_1 (1368) ✓
+  // 17:30-19:30 Hs → Vespertina = Q?_? (pendiente identificar)
+  // 21:00-22:30 Hs → Nocturna = Q?_? (pendiente identificar)
   // ════════════════════════════════════════════════════════════════════════
   try {
     const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/jujena', { headers });
     if (response.ok) {
       const html = await response.text();
       const codigos = {
-        primera: { quiniela: 23, sorteo: 5 },
-        matutina: { quiniela: 26, sorteo: 5 },
-        vespertina: { quiniela: 23, sorteo: 0 },
-        nocturna: { quiniela: 26, sorteo: 0 }
+        primera: { quiniela: 26, sorteo: 0 },     // 12:00 Hs (tentativo)
+        matutina: { quiniela: 26, sorteo: 1 },    // 14:00 Hs = 1368 ✓
+        vespertina: { quiniela: 26, sorteo: 2 },  // 17:30-19:30 Hs (tentativo)
+        nocturna: { quiniela: 26, sorteo: 3 }     // 21:00-22:30 Hs (tentativo)
       };
       const resultadosJujuy = parsearLoteriasMundiales(html, codigos);
 
