@@ -1,12 +1,12 @@
-// DIAGNÓSTICO ESPECÍFICO JUJUY - Buscar por horarios exactos
+// DIAGNÓSTICO - Todos los códigos Q23 de Jujuy en orden de aparición
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Mapeo de horarios de Jujuy a sorteos de mi página",
-    jujuy_loteriasmundiales: {},
-    mapeo_a_mi_pagina: {}
+    mensaje: "Todos los códigos Q23 de Jujuy (quiniela 23)",
+    codigos_q23: [],
+    mapeo_propuesto: {}
   };
 
   const headers = {
@@ -15,23 +15,19 @@ export default async function handler(req, res) {
     'Accept-Language': 'es-AR,es;q=0.9'
   };
 
-  function buscarCodigoPorHorario(html, horario) {
-    const regexHorario = new RegExp(horario.replace(':', ':?').replace('.', '\\.'), 'gi');
-    const matchHorario = regexHorario.exec(html);
-    
-    if (!matchHorario) return null;
+  function extraerCabeza(html, quiniela, sorteo) {
+    const id = `idQ${quiniela}_${sorteo}_N01`;
+    const patterns = [
+      `id="${id}"[^>]*>\\s*<b>\\s*([0-9]{3,4})\\s*</b>`,
+      `id="${id}"[^>]*>\\s*([0-9]{3,4})\\s*<`
+    ];
 
-    const fragmento = html.substring(matchHorario.index, matchHorario.index + 800);
-    const regexCodigo = /idQ(\d+)_(\d+)_N01[^>]*>\s*(?:<b>\s*)?(\d{3,4})/i;
-    const matchCodigo = fragmento.match(regexCodigo);
-
-    if (matchCodigo) {
-      return {
-        quiniela: parseInt(matchCodigo[1]),
-        sorteo: parseInt(matchCodigo[2]),
-        codigo: `Q${matchCodigo[1]}_${matchCodigo[2]}`,
-        cabeza: matchCodigo[3].padStart(4, '0')
-      };
+    for (const pattern of patterns) {
+      const regex = new RegExp(pattern, 'i');
+      const match = html.match(regex);
+      if (match && match[1]) {
+        return match[1].trim().padStart(4, '0');
+      }
     }
     return null;
   }
@@ -41,57 +37,69 @@ export default async function handler(req, res) {
     if (response.ok) {
       const html = await response.text();
       
-      // Horarios que aparecen en loteriasmundiales
-      const horariosLoteriasMundiales = {
-        '10:15': null,  // 4242
-        '11:30': null,  // 0370
-        '14:00': null,  // 4206
-        '15:30': null,  // podría ser el mismo que 14:00
-        '17:30': null,  // 9555
-        '19:30': null,  // podría ser el mismo que 17:30
-        '21:00': null,
-        '22:30': null
-      };
-
-      // Buscar cada horario
-      for (const horario of Object.keys(horariosLoteriasMundiales)) {
-        const info = buscarCodigoPorHorario(html, horario);
-        if (info) {
-          horariosLoteriasMundiales[horario] = info;
+      // Buscar TODOS los códigos Q23_X (sorteos 0 al 10)
+      for (let sorteo = 0; sorteo <= 10; sorteo++) {
+        const cabeza = extraerCabeza(html, 23, sorteo);
+        if (cabeza) {
+          resultado.codigos_q23.push({
+            codigo: `Q23_${sorteo}`,
+            quiniela: 23,
+            sorteo: sorteo,
+            cabeza: cabeza,
+            posicion_en_lista: resultado.codigos_q23.length
+          });
         }
       }
 
-      resultado.jujuy_loteriasmundiales = horariosLoteriasMundiales;
-
-      // Mapeo a mi página
-      // En mi página Jujuy tiene: Primera (12:00), Matutina (14:00), Vespertina (17:30), Nocturna (21:15)
-      // Pero en loteriasmundiales los horarios son: 10:15, 11:30, 14:00, 17:30, 21:00
+      // Ahora también buscar Q26, Q10, Q11, Q14 por si acaso
+      const otrasQuinielas = [26, 10, 11, 14, 15, 20];
+      resultado.otros_codigos = {};
       
-      // ESTRATEGIA: Mapear según el horario más cercano
-      resultado.mapeo_a_mi_pagina = {
-        primera: {
-          horario_mi_pagina: "12:00",
-          horario_loteriasmundiales: "10:15 o 11:30",
-          sugerencia: "Usar 10:15 (4242) porque es el primer sorteo del día",
-          codigo_sugerido: horariosLoteriasMundiales['10:15']
-        },
-        matutina: {
-          horario_mi_pagina: "14:00",
-          horario_loteriasmundiales: "14:00",
-          sugerencia: "Usar 14:00 directamente",
-          codigo_sugerido: horariosLoteriasMundiales['14:00']
-        },
-        vespertina: {
-          horario_mi_pagina: "17:30",
-          horario_loteriasmundiales: "17:30",
-          sugerencia: "Usar 17:30 directamente",
-          codigo_sugerido: horariosLoteriasMundiales['17:30']
-        },
-        nocturna: {
-          horario_mi_pagina: "21:15",
-          horario_loteriasmundiales: "21:00 o 22:30",
-          sugerencia: "Usar 21:00 o el último sorteo del día",
-          codigo_sugerido: horariosLoteriasMundiales['21:00'] || horariosLoteriasMundiales['22:30']
+      for (const q of otrasQuinielas) {
+        resultado.otros_codigos[`Q${q}`] = [];
+        for (let sorteo = 0; sorteo <= 5; sorteo++) {
+          const cabeza = extraerCabeza(html, q, sorteo);
+          if (cabeza) {
+            resultado.otros_codigos[`Q${q}`].push({
+              codigo: `Q${q}_${sorteo}`,
+              sorteo: sorteo,
+              cabeza: cabeza
+            });
+          }
+        }
+      }
+
+      // Mapeo propuesto basado en orden de aparición de Q23
+      if (resultado.codigos_q23.length >= 4) {
+        resultado.mapeo_propuesto = {
+          primera: {
+            codigo_sugerido: resultado.codigos_q23[0],
+            razon: "Primer código Q23 en el HTML (posición 0)"
+          },
+          matutina: {
+            codigo_sugerido: resultado.codigos_q23[1],
+            razon: "Segundo código Q23 en el HTML (posición 1)"
+          },
+          vespertina: {
+            codigo_sugerido: resultado.codigos_q23[2],
+            razon: "Tercer código Q23 en el HTML (posición 2)"
+          },
+          nocturna: {
+            codigo_sugerido: resultado.codigos_q23[3],
+            razon: "Cuarto código Q23 en el HTML (posición 3)"
+          }
+        };
+      }
+
+      // Verificación con los datos esperados de la imagen
+      resultado.verificacion_imagen = {
+        esperado_primera: "4242",
+        esperado_matutina: "4206", 
+        esperado_vespertina: "9555",
+        coincide: {
+          primera: resultado.codigos_q23[0]?.cabeza === "4242",
+          matutina: resultado.codigos_q23[1]?.cabeza === "4206",
+          vespertina: resultado.codigos_q23[2]?.cabeza === "9555"
         }
       };
     }
