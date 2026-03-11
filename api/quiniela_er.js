@@ -1,5 +1,5 @@
 // api/quiniela_er.js — VERSIÓN FINAL DE PRODUCCIÓN
-// Salta y Jujuy 100% corregidos con códigos confirmados
+// Jujuy CON Previa - 5 sorteos completos
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -190,10 +190,8 @@ export default async function handler(req, res) {
       return false;
     }
 
-    // JUJUY NO TIENE PREVIA
-    if (provinciaKey === 'jujuy' && sorteo === 'previa') {
-      return false;
-    }
+    // JUJUY AHORA SÍ TIENE PREVIA (cambio aquí)
+    // Ya no bloqueamos la previa de Jujuy
 
     return true;
   }
@@ -314,8 +312,9 @@ export default async function handler(req, res) {
 
   // ════════════════════════════════════════════════════════════════════════
   // FETCH LOTERIASMUNDIALES.COM - JUJUY
-  // CÓDIGOS CONFIRMADOS:
-  // Primera (10:15) = Q23_5 ✓ (4242)
+  // CÓDIGOS CONFIRMADOS - AHORA CON PREVIA:
+  // Previa (10:15) = Q23_5 ✓ (4242)
+  // Primera (11:30) = Q23_0 ✓ (0370)
   // Matutina (14:00) = Q23_1 ✓ (4206)
   // Vespertina (17:30) = Q23_2 ✓ (9555)
   // Nocturna (21:00) = Q23_3 ✓ (2177)
@@ -325,7 +324,8 @@ export default async function handler(req, res) {
     if (response.ok) {
       const html = await response.text();
       const codigos = {
-        primera: { quiniela: 23, sorteo: 5 },
+        previa: { quiniela: 23, sorteo: 5 },
+        primera: { quiniela: 23, sorteo: 0 },
         matutina: { quiniela: 23, sorteo: 1 },
         vespertina: { quiniela: 23, sorteo: 2 },
         nocturna: { quiniela: 23, sorteo: 3 }
