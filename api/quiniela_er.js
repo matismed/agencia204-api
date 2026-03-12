@@ -1,17 +1,18 @@
-// SCRAPER TURISTA - tujugada.com.ar ULTRA SIMPLE
+// SCRAPER TURISTA FINAL - ruta1000.com.ar
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Scraper de Turista - Parser ultra simple",
+    mensaje: "Scraper de Turista desde ruta1000.com.ar",
     provincias: {}
   };
 
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Accept': 'text/html,application/xhtml+xml',
-    'Accept-Language': 'es-AR,es;q=0.9'
+    'Accept-Language': 'es-AR,es;q=0.9',
+    'Referer': 'https://www.ruta1000.com.ar/'
   };
 
   const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
@@ -19,9 +20,12 @@ export default async function handler(req, res) {
   const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
   const anioHoy = ahoraArgentina.getFullYear();
   const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
+  
+  const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+  const diaSemanaURL = diasSemana[ahoraArgentina.getDay()];
 
-  function parsearSimple(html, numeroEsperado) {
-    // Primero, buscar el índice de "Turista" en el HTML
+  function parsearRuta1000(html, numeroEsperado) {
+    // Buscar "Turista" en el HTML
     const idxTurista = html.toLowerCase().indexOf('turista');
     
     if (idxTurista === -1) {
@@ -41,13 +45,23 @@ export default async function handler(req, res) {
     
     const tablaHTML = matchTabla[1];
     
-    // Buscar TODOS los números de 4 dígitos SOLO dentro de la tabla
+    // ESTRATEGIA MEJORADA: Solo extraer números que estén dentro de <td>...</td>
+    // y que NO sean el año 2026
     const numerosEnTabla = [];
-    const regex = /\b(\d{4})\b/g;
-    let match;
+    const regexCeldas = /<td[^>]*>([^<]*)<\/td>/gi;
+    let matchCelda;
     
-    while ((match = regex.exec(tablaHTML)) !== null) {
-      numerosEnTabla.push(match[1]);
+    while ((matchCelda = regexCeldas.exec(tablaHTML)) !== null) {
+      const contenido = matchCelda[1].trim();
+      
+      // Si es un número de exactamente 4 dígitos
+      if (/^\d{4}$/.test(contenido)) {
+        // NO agregar si es el año 2026 o años cercanos
+        const num = parseInt(contenido);
+        if (num < 2020 || num > 2030) {
+          numerosEnTabla.push(contenido);
+        }
+      }
     }
     
     // Buscar el índice del número esperado
@@ -56,7 +70,9 @@ export default async function handler(req, res) {
     if (indiceEsperado === -1) {
       return { 
         error: `No se encontró ${numeroEsperado} en la tabla`,
-        numeros_en_tabla: numerosEnTabla.slice(0, 30)
+        numeros_encontrados: numerosEnTabla.length,
+        primeros_10: numerosEnTabla.slice(0, 10),
+        todos: numerosEnTabla
       };
     }
     
@@ -69,25 +85,34 @@ export default async function handler(req, res) {
       num: num
     }));
     
+    if (numeros.length < 20) {
+      return {
+        error: `Solo se encontraron ${numeros.length} números (necesitamos 20)`,
+        numeros: numeros,
+        todos_encontrados: numerosEnTabla
+      };
+    }
+    
     return {
       fecha: fechaHoyFormato,
       numeros: numeros,
-      cabeza: numeros.length > 0 ? numeros[0].num : null,
+      cabeza: numeros[0].num,
       cantidad: numeros.length
     };
   }
 
-  // CÓRDOBA TURISTA (esperamos 0883)
+  // CÓRDOBA TURISTA
   try {
-    const response = await fetch('https://www.tujugada.com.ar/quiniela_cordoba.asp', { 
+    const urlCordoba = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Cordoba_${diaSemanaURL}`;
+    const response = await fetch(urlCordoba, { 
       headers,
       signal: AbortSignal.timeout(10000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.cordoba = parsearSimple(html, '0883');
-      resultado.provincias.cordoba.url_usada = 'https://www.tujugada.com.ar/quiniela_cordoba.asp';
+      resultado.provincias.cordoba = parsearRuta1000(html, '0883');
+      resultado.provincias.cordoba.url_usada = urlCordoba;
     } else {
       resultado.provincias.cordoba = { error: `HTTP ${response.status}` };
     }
@@ -95,17 +120,18 @@ export default async function handler(req, res) {
     resultado.provincias.cordoba = { error: e.message };
   }
 
-  // ENTRE RÍOS TURISTA (esperamos 1701)
+  // ENTRE RÍOS TURISTA
   try {
-    const response = await fetch('https://www.tujugada.com.ar/quiniela_entre_rios.asp', { 
+    const urlEntreRios = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Entre_Rios_${diaSemanaURL}`;
+    const response = await fetch(urlEntreRios, { 
       headers,
       signal: AbortSignal.timeout(10000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.entrerrios = parsearSimple(html, '1701');
-      resultado.provincias.entrerrios.url_usada = 'https://www.tujugada.com.ar/quiniela_entre_rios.asp';
+      resultado.provincias.entrerrios = parsearRuta1000(html, '1701');
+      resultado.provincias.entrerrios.url_usada = urlEntreRios;
     } else {
       resultado.provincias.entrerrios = { error: `HTTP ${response.status}` };
     }
@@ -124,7 +150,12 @@ export default async function handler(req, res) {
       resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20
   };
 
-  resultado.nota = "Parser mejorado: busca tabla HTML después de 'Turista' y extrae números solo de ahí";
+  resultado.info = {
+    dia_actual: diasSemana[ahoraArgentina.getDay()],
+    dia_usado_en_url: diaSemanaURL,
+    nota: "Parser forzado: solo extrae números de <td>, excluye años (2020-2030)"
+  };
 
   res.status(200).json(resultado);
 }
+
