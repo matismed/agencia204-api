@@ -21,9 +21,14 @@ export default async function handler(req, res) {
   const anioHoy = ahoraArgentina.getFullYear();
   const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
 
-  // Obtener día de la semana en español
+  // LÓGICA SIMPLE:
+  // ruta1000.com en la página de "Viernes" muestra "AYER Jueves"
+  // Entonces para obtener el sorteo de HOY, accedemos a la página de MAÑANA
+  const mañana = new Date(ahoraArgentina);
+  mañana.setDate(mañana.getDate() + 1);
+  
   const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-  const diaSemanaHoy = diasSemana[ahoraArgentina.getDay()];
+  const diaSemanaURL = diasSemana[mañana.getDay()];
 
   function htmlATexto(html) {
     return html.replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -104,7 +109,7 @@ export default async function handler(req, res) {
   // CÓRDOBA TURISTA
   try {
     // URL dinámica según el día de la semana
-    const urlCordoba = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Cordoba_${diaSemanaHoy}`;
+    const urlCordoba = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Cordoba_${diaSemanaURL}`;
     
     const response = await fetch(urlCordoba, { 
       headers,
@@ -124,7 +129,7 @@ export default async function handler(req, res) {
 
   // ENTRE RÍOS TURISTA
   try {
-    const urlEntreRios = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Entre_Rios_${diaSemanaHoy}`;
+    const urlEntreRios = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Entre_Rios_${diaSemanaURL}`;
     
     const response = await fetch(urlEntreRios, { 
       headers,
@@ -151,8 +156,9 @@ export default async function handler(req, res) {
   };
 
   resultado.info = {
-    dia_semana_usado: diaSemanaHoy,
-    nota: "La URL cambia según el día de la semana (Lunes, Martes, Miercoles, etc.)"
+    dia_actual: diasSemana[ahoraArgentina.getDay()],
+    dia_usado_en_url: diaSemanaURL,
+    nota: "ruta1000.com muestra sorteo de AYER, entonces para obtener HOY usamos URL de MAÑANA"
   };
 
   res.status(200).json(resultado);
