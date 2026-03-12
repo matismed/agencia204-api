@@ -1,18 +1,25 @@
-// BÚSQUEDA CORREGIDA - Turista en quinieladehoy.com
+// SCRAPER TURISTA - ruta1000.com.ar
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Búsqueda de Turista en quinieladehoy.com",
-    analisis: {}
+    mensaje: "Scraper de Turista desde ruta1000.com.ar",
+    provincias: {}
   };
 
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Accept': 'text/html,application/xhtml+xml',
-    'Accept-Language': 'es-AR,es;q=0.9'
+    'Accept-Language': 'es-AR,es;q=0.9',
+    'Referer': 'https://www.ruta1000.com.ar/'
   };
+
+  const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  const diaHoy = ahoraArgentina.getDate().toString().padStart(2, '0');
+  const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
+  const anioHoy = ahoraArgentina.getFullYear();
+  const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
 
   function htmlATexto(html) {
     return html.replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -26,123 +33,87 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
-  const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
-  const diaHoy = ahoraArgentina.getDate().toString().padStart(2, '0');
-  const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
-  const anioHoy = ahoraArgentina.getFullYear();
-  const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
+  function parsearRuta1000Turista(html) {
+    const texto = htmlATexto(html);
+    
+    // Buscar patrón: "TURISTA" seguido de fecha
+    const regexTurista = /TURISTA\s*DEL\s*\d{1,2}\s*DE\s*\w+\s*DE\s*\d{4}/i;
+    const matchTurista = regexTurista.exec(texto);
+    
+    if (!matchTurista) {
+      return { error: "No se encontró el patrón TURISTA en el HTML" };
+    }
 
+    // Extraer números después del match
+    const desde = matchTurista.index + matchTurista[0].length;
+    const fragmento = texto.substring(desde, desde + 2000);
+    
+    // Buscar tabla con números
+    // Patrón: 1° 0883 6° 5847 11° 9245...
+    const numeros = [];
+    const regex = /(\d{1,2})°\s*(\d{4})/g;
+    let match;
+    
+    while ((match = regex.exec(fragmento)) !== null && numeros.length < 20) {
+      const pos = parseInt(match[1]);
+      const num = match[2];
+      
+      if (pos >= 1 && pos <= 20) {
+        numeros.push({ pos, num });
+      }
+    }
+
+    // Ordenar por posición
+    numeros.sort((a, b) => a.pos - b.pos);
+
+    return {
+      fecha: fechaHoyFormato,
+      numeros: numeros,
+      cabeza: numeros.length > 0 ? numeros[0].num : null,
+      cantidad: numeros.length
+    };
+  }
+
+  // CÓRDOBA TURISTA
   try {
-    const response = await fetch('https://quinieladehoy.com.ar/quiniela', { 
+    const response = await fetch('https://www.ruta1000.com.ar/quiniela-de-cordoba/turista', { 
       headers,
       signal: AbortSignal.timeout(8000)
     });
     
-    if (!response.ok) {
-      resultado.error = `HTTP ${response.status}`;
-      res.status(200).json(resultado);
-      return;
+    if (response.ok) {
+      const html = await response.text();
+      resultado.provincias.cordoba = parsearRuta1000Turista(html);
+    } else {
+      resultado.provincias.cordoba = { error: `HTTP ${response.status}` };
     }
-
-    const html = await response.text();
-    const texto = htmlATexto(html);
-    
-    // ANÁLISIS 1: Buscar "Turista" en el texto
-    const menciones_turista = [];
-    const regexTurista = /(.{0,100}turista.{0,100})/gi;
-    let match;
-    while ((match = regexTurista.exec(texto)) !== null && menciones_turista.length < 5) {
-      menciones_turista.push(match[1].trim());
-    }
-    
-    resultado.analisis.menciones_turista = {
-      cantidad: menciones_turista.length,
-      fragmentos: menciones_turista
-    };
-
-    // ANÁLISIS 2: Buscar patrón "Quiniela Córdoba Turista"
-    const regexCordobaTurista = /Quiniela Córdoba\s*Turista\s*(\d{1,2}-\d{1,2}-\d{4})/i;
-    const matchCordoba = regexCordobaTurista.exec(texto);
-    
-    resultado.analisis.cordoba_turista = {
-      encontrado: !!matchCordoba,
-      match_completo: matchCordoba ? matchCordoba[0] : null,
-      fecha: matchCordoba ? matchCordoba[1] : null
-    };
-
-    if (matchCordoba) {
-      // Intentar parsear números
-      const desde = matchCordoba.index + matchCordoba[0].length;
-      const fragmento = texto.substring(desde, desde + 1000);
-      const lineas = fragmento.split('\n').map(l => l.trim()).filter(Boolean);
-      
-      const numeros = [];
-      for (let i = 0; i < lineas.length && numeros.length < 20; i++) {
-        const pos = parseInt(lineas[i]);
-        if (pos === numeros.length + 1 && lineas[i + 1] && /^\d{3,4}$/.test(lineas[i + 1])) {
-          numeros.push({ pos, num: lineas[i + 1].padStart(4, '0') });
-          i++;
-        }
-      }
-      
-      resultado.analisis.cordoba_turista.numeros_encontrados = numeros;
-      resultado.analisis.cordoba_turista.cabeza = numeros.length > 0 ? numeros[0].num : null;
-    }
-
-    // ANÁLISIS 3: Buscar patrón "Quiniela Entre Rios Turista"
-    const regexEntreRiosTurista = /Quiniela Entre Rios\s*Turista\s*(\d{1,2}-\d{1,2}-\d{4})/i;
-    const matchEntreRios = regexEntreRiosTurista.exec(texto);
-    
-    resultado.analisis.entrerrios_turista = {
-      encontrado: !!matchEntreRios,
-      match_completo: matchEntreRios ? matchEntreRios[0] : null,
-      fecha: matchEntreRios ? matchEntreRios[1] : null
-    };
-
-    if (matchEntreRios) {
-      const desde = matchEntreRios.index + matchEntreRios[0].length;
-      const fragmento = texto.substring(desde, desde + 1000);
-      const lineas = fragmento.split('\n').map(l => l.trim()).filter(Boolean);
-      
-      const numeros = [];
-      for (let i = 0; i < lineas.length && numeros.length < 20; i++) {
-        const pos = parseInt(lineas[i]);
-        if (pos === numeros.length + 1 && lineas[i + 1] && /^\d{3,4}$/.test(lineas[i + 1])) {
-          numeros.push({ pos, num: lineas[i + 1].padStart(4, '0') });
-          i++;
-        }
-      }
-      
-      resultado.analisis.entrerrios_turista.numeros_encontrados = numeros;
-      resultado.analisis.entrerrios_turista.cabeza = numeros.length > 0 ? numeros[0].num : null;
-    }
-
-    // ANÁLISIS 4: Buscar número 0883 en cualquier parte
-    const tiene0883 = texto.includes('0883');
-    resultado.analisis.busqueda_0883 = {
-      encontrado: tiene0883
-    };
-
-    if (tiene0883) {
-      const idx = texto.indexOf('0883');
-      resultado.analisis.busqueda_0883.contexto = texto.substring(Math.max(0, idx - 200), Math.min(texto.length, idx + 200));
-    }
-
-    // RESUMEN
-    resultado.resumen = {
-      quinieladehoy_tiene_turista: menciones_turista.length > 0,
-      cordoba_turista_disponible: !!matchCordoba,
-      entrerrios_turista_disponible: !!matchEntreRios,
-      cordoba_cabeza: matchCordoba && resultado.analisis.cordoba_turista.cabeza ? resultado.analisis.cordoba_turista.cabeza : null,
-      entrerrios_cabeza: matchEntreRios && resultado.analisis.entrerrios_turista.cabeza ? resultado.analisis.entrerrios_turista.cabeza : null,
-      recomendacion: (matchCordoba || matchEntreRios) 
-        ? "✅ quinieladehoy.com TIENE Turista - usar parsearTexto() con 'Turista'"
-        : "❌ quinieladehoy.com NO tiene Turista - buscar otra fuente"
-    };
-
   } catch(e) {
-    resultado.error = e.message;
+    resultado.provincias.cordoba = { error: e.message };
   }
+
+  // ENTRE RÍOS TURISTA
+  try {
+    const response = await fetch('https://www.ruta1000.com.ar/quiniela-de-entre-rios/turista', { 
+      headers,
+      signal: AbortSignal.timeout(8000)
+    });
+    
+    if (response.ok) {
+      const html = await response.text();
+      resultado.provincias.entrerrios = parsearRuta1000Turista(html);
+    } else {
+      resultado.provincias.entrerrios = { error: `HTTP ${response.status}` };
+    }
+  } catch(e) {
+    resultado.provincias.entrerrios = { error: e.message };
+  }
+
+  // Verificación
+  resultado.verificacion = {
+    cordoba_ok: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza === '0883',
+    entrerrios_ok: resultado.provincias.entrerrios && resultado.provincias.entrerrios.numeros && resultado.provincias.entrerrios.numeros.length > 0,
+    listo_para_produccion: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza === '0883'
+  };
 
   res.status(200).json(resultado);
 }
