@@ -1,4 +1,4 @@
-// api/quiniela_er.js — VERSIÓN FINAL DE PRODUCCIÓN
+// api/quiniela_er.js — 
 // Jujuy CON Previa - 5 sorteos completos
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
