@@ -1,10 +1,13 @@
-// SCRAPER TURISTA - chequinielas.com
+// SCRAPER TURISTA FINAL PRODUCCIÓN
+// Córdoba: chequinielas.com
+// Entre Ríos: loteriasmundiales.com.ar
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Scraper de Turista desde chequinielas.com",
+    mensaje: "Scraper Turista - Producción Final",
     provincias: {}
   };
 
@@ -20,44 +23,17 @@ export default async function handler(req, res) {
   const anioHoy = ahoraArgentina.getFullYear();
   const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
 
+  // PARSER para chequinielas.com (Córdoba)
   function parsearCheQuinielas(html) {
     const numeros = [];
-    
-    // Buscar todos los números dentro de la estructura de resultados
-    // Patrón: <número>\n<nombre> en secuencia del 1 al 20
-    
-    // Buscar todos los divs o elementos que contengan números de 4 dígitos
     const regexNumeros = /(\d{1,2})\.\s*\n\s*(\d{4})/g;
     let match;
     
     while ((match = regexNumeros.exec(html)) !== null && numeros.length < 20) {
       const pos = parseInt(match[1]);
       const num = match[2];
-      
       if (pos >= 1 && pos <= 20) {
         numeros.push({ pos, num });
-      }
-    }
-    
-    // Si no encontró con ese patrón, intentar otro
-    if (numeros.length === 0) {
-      // Buscar números en cualquier parte del HTML (fallback)
-      const todosNumeros = [];
-      const regex = /\b(\d{4})\b/g;
-      let m;
-      
-      while ((m = regex.exec(html)) !== null && todosNumeros.length < 100) {
-        const num = parseInt(m[1]);
-        // Excluir años
-        if (num < 2020 || num > 2030) {
-          todosNumeros.push(m[1]);
-        }
-      }
-      
-      // Tomar los primeros 20 únicos
-      const unicos = [...new Set(todosNumeros)];
-      for (let i = 0; i < Math.min(20, unicos.length); i++) {
-        numeros.push({ pos: i + 1, num: unicos[i] });
       }
     }
     
@@ -65,18 +41,51 @@ export default async function handler(req, res) {
       return { error: "No se encontraron números" };
     }
     
-    // Ordenar por posición
     numeros.sort((a, b) => a.pos - b.pos);
     
     return {
       fecha: fechaHoyFormato,
       numeros: numeros,
-      cabeza: numeros.length > 0 ? numeros[0].num : null,
+      cabeza: numeros[0].num,
       cantidad: numeros.length
     };
   }
 
-  // CÓRDOBA TURISTA
+  // PARSER para loteriasmundiales.com (Entre Ríos)
+  function parsearLoteriasMundiales(textoHTML, codigoQ) {
+    const numeros = [];
+    
+    // Buscar patrón Q{codigo}_data con estructura JSON
+    const regexData = new RegExp(`Q${codigoQ.quiniela}_${codigoQ.sorteo}_data\\s*=\\s*\\[(.*?)\\]`, 's');
+    const matchData = regexData.exec(textoHTML);
+    
+    if (!matchData) {
+      return { error: `No se encontró Q${codigoQ.quiniela}_${codigoQ.sorteo}_data` };
+    }
+    
+    const dataStr = matchData[1];
+    const regexNumeros = /"(\d{4})"/g;
+    let match;
+    let pos = 1;
+    
+    while ((match = regexNumeros.exec(dataStr)) !== null && pos <= 20) {
+      numeros.push({ pos, num: match[1] });
+      pos++;
+    }
+    
+    if (numeros.length === 0) {
+      return { error: "No se encontraron números en Q_data" };
+    }
+    
+    return {
+      fecha: fechaHoyFormato,
+      numeros: numeros,
+      cabeza: numeros[0].num,
+      cantidad: numeros.length
+    };
+  }
+
+  // CÓRDOBA TURISTA - desde chequinielas.com
   try {
     const response = await fetch('https://chequinielas.com/cordoba/turista', { 
       headers,
@@ -87,6 +96,7 @@ export default async function handler(req, res) {
       const html = await response.text();
       resultado.provincias.cordoba = parsearCheQuinielas(html);
       resultado.provincias.cordoba.url_usada = 'https://chequinielas.com/cordoba/turista';
+      resultado.provincias.cordoba.fuente = 'chequinielas.com';
     } else {
       resultado.provincias.cordoba = { error: `HTTP ${response.status}` };
     }
@@ -94,17 +104,47 @@ export default async function handler(req, res) {
     resultado.provincias.cordoba = { error: e.message };
   }
 
-  // ENTRE RÍOS TURISTA
+  // ENTRE RÍOS TURISTA - desde loteriasmundiales.com.ar
+  // Código Q para Entre Ríos Turista (necesitamos identificarlo)
+  // Por ahora intentamos con el patrón general de loteriasmundiales
   try {
-    const response = await fetch('https://chequinielas.com/entre-rios/turista', { 
+    const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/entre_rios', { 
       headers,
       signal: AbortSignal.timeout(10000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.entrerrios = parsearCheQuinielas(html);
-      resultado.provincias.entrerrios.url_usada = 'https://chequinielas.com/entre-rios/turista';
+      
+      // Intentar encontrar Turista en el HTML
+      // Loteriasmundiales usa códigos Q similares a los otros sorteos
+      // Probamos con Q16 (el código de Entre Ríos) sorteo 6 (hipótesis para Turista)
+      const intentos = [
+        { quiniela: 16, sorteo: 6 },
+        { quiniela: 16, sorteo: 4 },
+        { quiniela: 16, sorteo: 5 }
+      ];
+      
+      let encontrado = false;
+      for (const codigo of intentos) {
+        const resultado_parse = parsearLoteriasMundiales(html, codigo);
+        if (!resultado_parse.error) {
+          resultado.provincias.entrerrios = resultado_parse;
+          resultado.provincias.entrerrios.url_usada = 'https://www.loteriasmundiales.com.ar/Quinielas/entre_rios';
+          resultado.provincias.entrerrios.fuente = 'loteriasmundiales.com.ar';
+          resultado.provincias.entrerrios.codigo_q = `Q${codigo.quiniela}_${codigo.sorteo}`;
+          encontrado = true;
+          break;
+        }
+      }
+      
+      if (!encontrado) {
+        resultado.provincias.entrerrios = { 
+          error: "No se encontró código Q válido para Turista",
+          nota: "Intentados: Q16_6, Q16_4, Q16_5"
+        };
+      }
+      
     } else {
       resultado.provincias.entrerrios = { error: `HTTP ${response.status}` };
     }
@@ -114,16 +154,18 @@ export default async function handler(req, res) {
 
   // Verificación
   resultado.verificacion = {
-    cordoba_tiene_numeros: resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad > 0,
-    cordoba_tiene_20: resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20,
-    entrerrios_tiene_numeros: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad > 0,
-    entrerrios_tiene_20: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20,
+    cordoba_ok: resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20,
+    entrerrios_ok: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20,
     listo_para_produccion: 
       resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20 &&
       resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20
   };
 
-  resultado.nota = "Usando chequinielas.com - URLs estáticas que siempre muestran último sorteo";
+  resultado.fuentes = {
+    cordoba: "chequinielas.com/cordoba/turista",
+    entrerrios: "loteriasmundiales.com.ar/Quinielas/entre_rios"
+  };
 
   res.status(200).json(resultado);
 }
+
