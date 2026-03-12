@@ -1,11 +1,11 @@
-// BÚSQUEDA RÁPIDA - Solo fuentes principales de Turista
+// BÚSQUEDA CORREGIDA - Turista en quinieladehoy.com
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Búsqueda rápida de Turista",
-    fuentes: {}
+    mensaje: "Búsqueda de Turista en quinieladehoy.com",
+    analisis: {}
   };
 
   const headers = {
@@ -26,101 +26,123 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
-  // FUENTE 1: quinieladehoy.com.ar
+  const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  const diaHoy = ahoraArgentina.getDate().toString().padStart(2, '0');
+  const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
+  const anioHoy = ahoraArgentina.getFullYear();
+  const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
+
   try {
     const response = await fetch('https://quinieladehoy.com.ar/quiniela', { 
       headers,
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(8000)
     });
     
-    if (response.ok) {
-      const html = await response.text();
-      const texto = htmlATexto(html);
-      
-      const tiene0883 = texto.includes('0883');
-      const tieneTurista = texto.toLowerCase().includes('turista');
-      
-      resultado.fuentes.quinieladehoy = {
-        accesible: true,
-        tiene_0883,
-        tiene_turista: tieneTurista,
-        relevancia: (tiene0883 ? 10 : 0) + (tieneTurista ? 5 : 0)
-      };
+    if (!response.ok) {
+      resultado.error = `HTTP ${response.status}`;
+      res.status(200).json(resultado);
+      return;
+    }
 
-      if (tiene0883) {
-        const idx = texto.indexOf('0883');
-        resultado.fuentes.quinieladehoy.fragmento = texto.substring(Math.max(0, idx - 150), Math.min(texto.length, idx + 150));
+    const html = await response.text();
+    const texto = htmlATexto(html);
+    
+    // ANÁLISIS 1: Buscar "Turista" en el texto
+    const menciones_turista = [];
+    const regexTurista = /(.{0,100}turista.{0,100})/gi;
+    let match;
+    while ((match = regexTurista.exec(texto)) !== null && menciones_turista.length < 5) {
+      menciones_turista.push(match[1].trim());
+    }
+    
+    resultado.analisis.menciones_turista = {
+      cantidad: menciones_turista.length,
+      fragmentos: menciones_turista
+    };
+
+    // ANÁLISIS 2: Buscar patrón "Quiniela Córdoba Turista"
+    const regexCordobaTurista = /Quiniela Córdoba\s*Turista\s*(\d{1,2}-\d{1,2}-\d{4})/i;
+    const matchCordoba = regexCordobaTurista.exec(texto);
+    
+    resultado.analisis.cordoba_turista = {
+      encontrado: !!matchCordoba,
+      match_completo: matchCordoba ? matchCordoba[0] : null,
+      fecha: matchCordoba ? matchCordoba[1] : null
+    };
+
+    if (matchCordoba) {
+      // Intentar parsear números
+      const desde = matchCordoba.index + matchCordoba[0].length;
+      const fragmento = texto.substring(desde, desde + 1000);
+      const lineas = fragmento.split('\n').map(l => l.trim()).filter(Boolean);
+      
+      const numeros = [];
+      for (let i = 0; i < lineas.length && numeros.length < 20; i++) {
+        const pos = parseInt(lineas[i]);
+        if (pos === numeros.length + 1 && lineas[i + 1] && /^\d{3,4}$/.test(lineas[i + 1])) {
+          numeros.push({ pos, num: lineas[i + 1].padStart(4, '0') });
+          i++;
+        }
       }
+      
+      resultado.analisis.cordoba_turista.numeros_encontrados = numeros;
+      resultado.analisis.cordoba_turista.cabeza = numeros.length > 0 ? numeros[0].num : null;
     }
-  } catch(e) {
-    resultado.fuentes.quinieladehoy = { error: e.message };
-  }
 
-  // FUENTE 2: resultadoquiniela.com.ar
-  try {
-    const response = await fetch('https://www.resultadoquiniela.com.ar/', { 
-      headers,
-      signal: AbortSignal.timeout(5000)
-    });
+    // ANÁLISIS 3: Buscar patrón "Quiniela Entre Rios Turista"
+    const regexEntreRiosTurista = /Quiniela Entre Rios\s*Turista\s*(\d{1,2}-\d{1,2}-\d{4})/i;
+    const matchEntreRios = regexEntreRiosTurista.exec(texto);
     
-    if (response.ok) {
-      const html = await response.text();
-      const texto = htmlATexto(html);
-      
-      const tiene0883 = texto.includes('0883');
-      const tieneTurista = texto.toLowerCase().includes('turista');
-      
-      resultado.fuentes.resultadoquiniela = {
-        accesible: true,
-        tiene_0883,
-        tiene_turista: tieneTurista,
-        relevancia: (tiene0883 ? 10 : 0) + (tieneTurista ? 5 : 0)
-      };
+    resultado.analisis.entrerrios_turista = {
+      encontrado: !!matchEntreRios,
+      match_completo: matchEntreRios ? matchEntreRios[0] : null,
+      fecha: matchEntreRios ? matchEntreRios[1] : null
+    };
 
-      if (tiene0883) {
-        const idx = texto.indexOf('0883');
-        resultado.fuentes.resultadoquiniela.fragmento = texto.substring(Math.max(0, idx - 150), Math.min(texto.length, idx + 150));
+    if (matchEntreRios) {
+      const desde = matchEntreRios.index + matchEntreRios[0].length;
+      const fragmento = texto.substring(desde, desde + 1000);
+      const lineas = fragmento.split('\n').map(l => l.trim()).filter(Boolean);
+      
+      const numeros = [];
+      for (let i = 0; i < lineas.length && numeros.length < 20; i++) {
+        const pos = parseInt(lineas[i]);
+        if (pos === numeros.length + 1 && lineas[i + 1] && /^\d{3,4}$/.test(lineas[i + 1])) {
+          numeros.push({ pos, num: lineas[i + 1].padStart(4, '0') });
+          i++;
+        }
       }
-    }
-  } catch(e) {
-    resultado.fuentes.resultadoquiniela = { error: e.message };
-  }
-
-  // FUENTE 3: loteriasmundiales Córdoba (buscar Q6_4)
-  try {
-    const response = await fetch('https://www.loteriasmundiales.com.ar/Quinielas/cordoba', { 
-      headers,
-      signal: AbortSignal.timeout(5000)
-    });
-    
-    if (response.ok) {
-      const html = await response.text();
       
-      // Buscar Q6_4 (podría ser Turista)
-      const regexQ6_4 = /idQ6_4_N01[^>]*>\s*(?:<b>\s*)?(\d{3,4})/i;
-      const matchQ6_4 = html.match(regexQ6_4);
-      
-      resultado.fuentes.loteriasmundiales_cordoba = {
-        accesible: true,
-        tiene_Q6_4: !!matchQ6_4,
-        Q6_4_cabeza: matchQ6_4 ? matchQ6_4[1].padStart(4, '0') : null,
-        es_0883: matchQ6_4 && matchQ6_4[1].padStart(4, '0') === '0883',
-        relevancia: (matchQ6_4 && matchQ6_4[1].padStart(4, '0') === '0883') ? 10 : 0
-      };
+      resultado.analisis.entrerrios_turista.numeros_encontrados = numeros;
+      resultado.analisis.entrerrios_turista.cabeza = numeros.length > 0 ? numeros[0].num : null;
     }
+
+    // ANÁLISIS 4: Buscar número 0883 en cualquier parte
+    const tiene0883 = texto.includes('0883');
+    resultado.analisis.busqueda_0883 = {
+      encontrado: tiene0883
+    };
+
+    if (tiene0883) {
+      const idx = texto.indexOf('0883');
+      resultado.analisis.busqueda_0883.contexto = texto.substring(Math.max(0, idx - 200), Math.min(texto.length, idx + 200));
+    }
+
+    // RESUMEN
+    resultado.resumen = {
+      quinieladehoy_tiene_turista: menciones_turista.length > 0,
+      cordoba_turista_disponible: !!matchCordoba,
+      entrerrios_turista_disponible: !!matchEntreRios,
+      cordoba_cabeza: matchCordoba && resultado.analisis.cordoba_turista.cabeza ? resultado.analisis.cordoba_turista.cabeza : null,
+      entrerrios_cabeza: matchEntreRios && resultado.analisis.entrerrios_turista.cabeza ? resultado.analisis.entrerrios_turista.cabeza : null,
+      recomendacion: (matchCordoba || matchEntreRios) 
+        ? "✅ quinieladehoy.com TIENE Turista - usar parsearTexto() con 'Turista'"
+        : "❌ quinieladehoy.com NO tiene Turista - buscar otra fuente"
+    };
+
   } catch(e) {
-    resultado.fuentes.loteriasmundiales_cordoba = { error: e.message };
+    resultado.error = e.message;
   }
-
-  // Determinar mejor fuente
-  const ranking = Object.entries(resultado.fuentes)
-    .filter(([_, data]) => data.accesible || data.tiene_Q6_4)
-    .sort((a, b) => (b[1].relevancia || 0) - (a[1].relevancia || 0));
-
-  resultado.mejor_fuente = ranking.length > 0 ? ranking[0][0] : null;
-  resultado.recomendacion = ranking.length > 0 && ranking[0][1].relevancia > 0 
-    ? `Usar ${ranking[0][0]} - tiene datos de Turista`
-    : "No se encontró ninguna fuente con Turista (0883)";
 
   res.status(200).json(resultado);
 }
