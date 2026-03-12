@@ -21,14 +21,10 @@ export default async function handler(req, res) {
   const anioHoy = ahoraArgentina.getFullYear();
   const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
 
-  // LÓGICA SIMPLE:
-  // ruta1000.com en la página de "Viernes" muestra "AYER Jueves"
-  // Entonces para obtener el sorteo de HOY, accedemos a la página de MAÑANA
-  const mañana = new Date(ahoraArgentina);
-  mañana.setDate(mañana.getDate() + 1);
-  
+  // LÓGICA SIMPLE: usar día de HOY
+  // ruta1000.com actualiza el mismo día
   const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-  const diaSemanaURL = diasSemana[mañana.getDay()];
+  const diaSemanaURL = diasSemana[ahoraArgentina.getDay()];
 
   function htmlATexto(html) {
     return html.replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -158,7 +154,7 @@ export default async function handler(req, res) {
   resultado.info = {
     dia_actual: diasSemana[ahoraArgentina.getDay()],
     dia_usado_en_url: diaSemanaURL,
-    nota: "ruta1000.com muestra sorteo de AYER, entonces para obtener HOY usamos URL de MAÑANA"
+    nota: "Usando URL del día actual - ruta1000.com actualiza el mismo día"
   };
 
   res.status(200).json(resultado);
