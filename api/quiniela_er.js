@@ -1,4 +1,4 @@
-// DIAGNÓSTICO - Scraper de Turista de tujugada.com.ar
+// DIAGNÓSTICO - Scraper de Turista de tujugada.com
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
