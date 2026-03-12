@@ -21,28 +21,47 @@ export default async function handler(req, res) {
   const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
 
   function parsearSimple(html, numeroEsperado) {
-    // Buscar TODOS los números de 4 dígitos en TODO el HTML
-    const todosLosNumeros = [];
+    // Primero, buscar el índice de "Turista" en el HTML
+    const idxTurista = html.toLowerCase().indexOf('turista');
+    
+    if (idxTurista === -1) {
+      return { error: "No se encontró 'Turista' en el HTML" };
+    }
+    
+    // Extraer fragmento después de "Turista"
+    const fragmentoHTML = html.substring(idxTurista, idxTurista + 15000);
+    
+    // Buscar la primera tabla después de "Turista"
+    const regexTabla = /<table[^>]*>([\s\S]*?)<\/table>/i;
+    const matchTabla = regexTabla.exec(fragmentoHTML);
+    
+    if (!matchTabla) {
+      return { error: "No se encontró tabla después de 'Turista'" };
+    }
+    
+    const tablaHTML = matchTabla[1];
+    
+    // Buscar TODOS los números de 4 dígitos SOLO dentro de la tabla
+    const numerosEnTabla = [];
     const regex = /\b(\d{4})\b/g;
     let match;
     
-    while ((match = regex.exec(html)) !== null) {
-      todosLosNumeros.push(match[1]);
+    while ((match = regex.exec(tablaHTML)) !== null) {
+      numerosEnTabla.push(match[1]);
     }
     
-    // Buscar el índice donde aparece el número esperado (cabeza de Turista)
-    const indiceEsperado = todosLosNumeros.indexOf(numeroEsperado);
+    // Buscar el índice del número esperado
+    const indiceEsperado = numerosEnTabla.indexOf(numeroEsperado);
     
     if (indiceEsperado === -1) {
       return { 
-        error: `No se encontró el número esperado ${numeroEsperado}`,
-        total_numeros_encontrados: todosLosNumeros.length,
-        primeros_20: todosLosNumeros.slice(0, 20)
+        error: `No se encontró ${numeroEsperado} en la tabla`,
+        numeros_en_tabla: numerosEnTabla.slice(0, 30)
       };
     }
     
     // Extraer 20 números a partir del número esperado
-    const numerosExtraidos = todosLosNumeros.slice(indiceEsperado, indiceEsperado + 20);
+    const numerosExtraidos = numerosEnTabla.slice(indiceEsperado, indiceEsperado + 20);
     
     // Convertir a formato con posición
     const numeros = numerosExtraidos.map((num, idx) => ({
@@ -54,9 +73,7 @@ export default async function handler(req, res) {
       fecha: fechaHoyFormato,
       numeros: numeros,
       cabeza: numeros.length > 0 ? numeros[0].num : null,
-      cantidad: numeros.length,
-      indice_encontrado: indiceEsperado,
-      total_numeros_en_html: todosLosNumeros.length
+      cantidad: numeros.length
     };
   }
 
@@ -107,7 +124,7 @@ export default async function handler(req, res) {
       resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20
   };
 
-  resultado.nota = "Parser ultra simple: busca TODOS los números de 4 dígitos y extrae 20 a partir del número esperado";
+  resultado.nota = "Parser mejorado: busca tabla HTML después de 'Turista' y extrae números solo de ahí";
 
   res.status(200).json(resultado);
 }
