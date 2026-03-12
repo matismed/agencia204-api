@@ -1,4 +1,4 @@
-// api/quiniela_er.js — 
+// api/quiniela_er.js — VERSIÓN FINAL DE PRODUCCIÓN
 // Jujuy CON Previa - 5 sorteos completos
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     matutina: { hora: 14, minuto: 0, minutosDia: 14 * 60 },
     vespertina: { hora: 17, minuto: 30, minutosDia: 17 * 60 + 30 },
     nocturna: { hora: 21, minuto: 15, minutosDia: 21 * 60 + 15 },
-    turista: { hora: 22, minuto: 30, minutosDia: 22 * 60 + 30 }
+    turista: { hora: 22, minuto: 15, minutosDia: 22 * 60 + 15 }
   };
 
   function sorteoYaOcurrio(sorteo) {
@@ -564,6 +564,76 @@ export default async function handler(req, res) {
       fecha: hoy,
       numeros: []
     };
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // FETCH LOTERIASMUNDIALES - TURISTA ENTRE RÍOS (Q5_4)
+  // ════════════════════════════════════════════════════════════════════════
+  try {
+    const urlTuristaER = 'https://www.loteriasmundiales.com/Quinielas/entrerriana?Q5_4';
+    const responseTuristaER = await fetch(urlTuristaER, { 
+      headers,
+      signal: AbortSignal.timeout(10000)
+    });
+    
+    if (responseTuristaER.ok) {
+      const htmlTuristaER = await responseTuristaER.text();
+      
+      // Parser idéntico al que usamos para otras provincias de loteriasmundiales
+      const regexNumeros = /<td class="num">(\d{4})<\/td>/g;
+      const numerosTuristaER = [];
+      let matchNum;
+      
+      while ((matchNum = regexNumeros.exec(htmlTuristaER)) !== null) {
+        numerosTuristaER.push(matchNum[1]);
+      }
+      
+      if (numerosTuristaER.length === 20) {
+        // Convertir a formato con posiciones
+        const numerosFormateados = numerosTuristaER.map((num, index) => ({
+          pos: index + 1,
+          num: num
+        }));
+        
+        resultado.provincias.entrerrios.sorteos.turista = {
+          fecha: fechaHoyFormato,
+          numeros: numerosFormateados
+        };
+      } else {
+        // Si no encontró 20 números, marcar como pendiente
+        if (!sorteoYaOcurrio('turista')) {
+          resultado.provincias.entrerrios.sorteos.turista = {
+            fecha: hoy,
+            numeros: [],
+            pendiente: true,
+            horaPrevista: '22:15'
+          };
+        } else {
+          resultado.provincias.entrerrios.sorteos.turista = {
+            fecha: hoy,
+            numeros: [],
+            error: 'No se encontraron 20 números en loteriasmundiales (Q5_4)'
+          };
+        }
+      }
+    }
+  } catch(e) {
+    resultado._errorTuristaEntreRios = e.message;
+    // Mantener turista pendiente en caso de error de red
+    if (!sorteoYaOcurrio('turista')) {
+      resultado.provincias.entrerrios.sorteos.turista = {
+        fecha: hoy,
+        numeros: [],
+        pendiente: true,
+        horaPrevista: '22:15'
+      };
+    } else {
+      resultado.provincias.entrerrios.sorteos.turista = {
+        fecha: hoy,
+        numeros: [],
+        error: e.message
+      };
+    }
   }
 
   res.status(200).json(resultado);
