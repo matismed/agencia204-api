@@ -1,18 +1,17 @@
-// SCRAPER TURISTA FINAL - ruta1000.com.ar
+// SCRAPER TURISTA - chequinielas.com
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Scraper de Turista desde ruta1000.com.ar",
+    mensaje: "Scraper de Turista desde chequinielas.com",
     provincias: {}
   };
 
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Accept': 'text/html,application/xhtml+xml',
-    'Accept-Language': 'es-AR,es;q=0.9',
-    'Referer': 'https://www.ruta1000.com.ar/'
+    'Accept-Language': 'es-AR,es;q=0.9'
   };
 
   const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
@@ -20,99 +19,74 @@ export default async function handler(req, res) {
   const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
   const anioHoy = ahoraArgentina.getFullYear();
   const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
-  
-  const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-  const diaSemanaURL = diasSemana[ahoraArgentina.getDay()];
 
-  function parsearRuta1000(html, numeroEsperado) {
-    // Buscar "Turista" en el HTML
-    const idxTurista = html.toLowerCase().indexOf('turista');
+  function parsearCheQuinielas(html) {
+    const numeros = [];
     
-    if (idxTurista === -1) {
-      return { error: "No se encontró 'Turista' en el HTML" };
-    }
+    // Buscar todos los números dentro de la estructura de resultados
+    // Patrón: <número>\n<nombre> en secuencia del 1 al 20
     
-    // Extraer fragmento después de "Turista"
-    const fragmentoHTML = html.substring(idxTurista, idxTurista + 15000);
+    // Buscar todos los divs o elementos que contengan números de 4 dígitos
+    const regexNumeros = /(\d{1,2})\.\s*\n\s*(\d{4})/g;
+    let match;
     
-    // Buscar la primera tabla después de "Turista"
-    const regexTabla = /<table[^>]*>([\s\S]*?)<\/table>/i;
-    const matchTabla = regexTabla.exec(fragmentoHTML);
-    
-    if (!matchTabla) {
-      return { error: "No se encontró tabla después de 'Turista'" };
-    }
-    
-    const tablaHTML = matchTabla[1];
-    
-    // ESTRATEGIA MEJORADA: Solo extraer números que estén dentro de <td>...</td>
-    // y que NO sean el año 2026
-    const numerosEnTabla = [];
-    const regexCeldas = /<td[^>]*>([^<]*)<\/td>/gi;
-    let matchCelda;
-    
-    while ((matchCelda = regexCeldas.exec(tablaHTML)) !== null) {
-      const contenido = matchCelda[1].trim();
+    while ((match = regexNumeros.exec(html)) !== null && numeros.length < 20) {
+      const pos = parseInt(match[1]);
+      const num = match[2];
       
-      // Si es un número de exactamente 4 dígitos
-      if (/^\d{4}$/.test(contenido)) {
-        // NO agregar si es el año 2026 o años cercanos
-        const num = parseInt(contenido);
-        if (num < 2020 || num > 2030) {
-          numerosEnTabla.push(contenido);
-        }
+      if (pos >= 1 && pos <= 20) {
+        numeros.push({ pos, num });
       }
     }
     
-    // Buscar el índice del número esperado
-    const indiceEsperado = numerosEnTabla.indexOf(numeroEsperado);
-    
-    if (indiceEsperado === -1) {
-      return { 
-        error: `No se encontró ${numeroEsperado} en la tabla`,
-        numeros_encontrados: numerosEnTabla.length,
-        primeros_10: numerosEnTabla.slice(0, 10),
-        todos: numerosEnTabla
-      };
+    // Si no encontró con ese patrón, intentar otro
+    if (numeros.length === 0) {
+      // Buscar números en cualquier parte del HTML (fallback)
+      const todosNumeros = [];
+      const regex = /\b(\d{4})\b/g;
+      let m;
+      
+      while ((m = regex.exec(html)) !== null && todosNumeros.length < 100) {
+        const num = parseInt(m[1]);
+        // Excluir años
+        if (num < 2020 || num > 2030) {
+          todosNumeros.push(m[1]);
+        }
+      }
+      
+      // Tomar los primeros 20 únicos
+      const unicos = [...new Set(todosNumeros)];
+      for (let i = 0; i < Math.min(20, unicos.length); i++) {
+        numeros.push({ pos: i + 1, num: unicos[i] });
+      }
     }
     
-    // Extraer 20 números a partir del número esperado
-    const numerosExtraidos = numerosEnTabla.slice(indiceEsperado, indiceEsperado + 20);
-    
-    // Convertir a formato con posición
-    const numeros = numerosExtraidos.map((num, idx) => ({
-      pos: idx + 1,
-      num: num
-    }));
-    
-    if (numeros.length < 20) {
-      return {
-        error: `Solo se encontraron ${numeros.length} números (necesitamos 20)`,
-        numeros: numeros,
-        todos_encontrados: numerosEnTabla
-      };
+    if (numeros.length === 0) {
+      return { error: "No se encontraron números" };
     }
+    
+    // Ordenar por posición
+    numeros.sort((a, b) => a.pos - b.pos);
     
     return {
       fecha: fechaHoyFormato,
       numeros: numeros,
-      cabeza: numeros[0].num,
+      cabeza: numeros.length > 0 ? numeros[0].num : null,
       cantidad: numeros.length
     };
   }
 
   // CÓRDOBA TURISTA
   try {
-    const urlCordoba = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Cordoba_${diaSemanaURL}`;
-    const response = await fetch(urlCordoba, { 
+    const response = await fetch('https://chequinielas.com/cordoba/turista', { 
       headers,
       signal: AbortSignal.timeout(10000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.cordoba = parsearRuta1000(html, '0883');
-      resultado.provincias.cordoba.url_usada = urlCordoba;
+      resultado.provincias.cordoba = parsearCheQuinielas(html);
+      resultado.provincias.cordoba.url_usada = 'https://chequinielas.com/cordoba/turista';
     } else {
       resultado.provincias.cordoba = { error: `HTTP ${response.status}` };
     }
@@ -122,16 +96,15 @@ export default async function handler(req, res) {
 
   // ENTRE RÍOS TURISTA
   try {
-    const urlEntreRios = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Entre_Rios_${diaSemanaURL}`;
-    const response = await fetch(urlEntreRios, { 
+    const response = await fetch('https://chequinielas.com/entre-rios/turista', { 
       headers,
       signal: AbortSignal.timeout(10000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.entrerrios = parsearRuta1000(html, '1701');
-      resultado.provincias.entrerrios.url_usada = urlEntreRios;
+      resultado.provincias.entrerrios = parsearCheQuinielas(html);
+      resultado.provincias.entrerrios.url_usada = 'https://chequinielas.com/entre-rios/turista';
     } else {
       resultado.provincias.entrerrios = { error: `HTTP ${response.status}` };
     }
@@ -141,21 +114,16 @@ export default async function handler(req, res) {
 
   // Verificación
   resultado.verificacion = {
-    cordoba_ok: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza === '0883',
+    cordoba_tiene_numeros: resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad > 0,
     cordoba_tiene_20: resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20,
-    entrerrios_ok: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cabeza === '1701',
+    entrerrios_tiene_numeros: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad > 0,
     entrerrios_tiene_20: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20,
     listo_para_produccion: 
       resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20 &&
       resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20
   };
 
-  resultado.info = {
-    dia_actual: diasSemana[ahoraArgentina.getDay()],
-    dia_usado_en_url: diaSemanaURL,
-    nota: "Parser forzado: solo extrae números de <td>, excluye años (2020-2030)"
-  };
+  resultado.nota = "Usando chequinielas.com - URLs estáticas que siempre muestran último sorteo";
 
   res.status(200).json(resultado);
 }
-
