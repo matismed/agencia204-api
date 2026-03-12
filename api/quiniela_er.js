@@ -1,11 +1,11 @@
-// SCRAPER TURISTA - tujugada.com.ar
+// DIAGNÓSTICO RAW - tujugada.com.ar HTML completo
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Scraper de Turista desde tujugada.com.ar",
-    provincias: {}
+    mensaje: "Diagnóstico HTML raw de tujugada.com.ar",
+    urls: {}
   };
 
   const headers = {
@@ -15,132 +15,94 @@ export default async function handler(req, res) {
     'Referer': 'https://www.tujugada.com.ar/'
   };
 
-  const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
-  const diaHoy = ahoraArgentina.getDate().toString().padStart(2, '0');
-  const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
-  const anioHoy = ahoraArgentina.getFullYear();
-  const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
-
-  function htmlATexto(html) {
-    return html.replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/?(div|p|li|tr|td|th|h[1-6])[^>]*>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n{3,}/g, '\n\n');
-  }
-
-  function parsearTujugadaTurista(html) {
-    // Buscar directamente en el HTML los números dentro de la tabla
-    // Patrón según las imágenes: tabla con Ubic | NUMERO
-    
-    const numeros = [];
-    
-    // Estrategia 1: Buscar elementos <td> con números de 4 dígitos después de encontrar "Turista"
-    const idxTurista = html.toLowerCase().indexOf('turista');
-    if (idxTurista === -1) {
-      return { error: "No se encontró 'Turista' en el HTML" };
-    }
-
-    // Extraer fragmento HTML después de "Turista"
-    const fragmento = html.substring(idxTurista, idxTurista + 5000);
-    
-    // Buscar números dentro de <td> o texto plano
-    // Patrón: <td>0883</td> o similar
-    const regexTd = /<td[^>]*>\s*(\d{4})\s*<\/td>/gi;
-    let match;
-    
-    while ((match = regexTd.exec(fragmento)) !== null && numeros.length < 20) {
-      const num = match[1];
-      numeros.push({ 
-        pos: numeros.length + 1, 
-        num: num 
-      });
-    }
-
-    // Si no encontró con <td>, intentar con texto plano
-    if (numeros.length === 0) {
-      const texto = htmlATexto(fragmento);
-      const lineas = texto.split('\n').map(l => l.trim()).filter(Boolean);
-      
-      for (let i = 0; i < lineas.length && numeros.length < 20; i++) {
-        // Buscar patrón: número posición seguido de número de 4 dígitos
-        if (/^\d{1,2}$/.test(lineas[i])) {
-          const pos = parseInt(lineas[i]);
-          if (pos === numeros.length + 1 && lineas[i + 1] && /^\d{4}$/.test(lineas[i + 1])) {
-            numeros.push({ 
-              pos: pos, 
-              num: lineas[i + 1] 
-            });
-            i++; // saltar la línea del número
-          }
-        }
-      }
-    }
-
-    if (numeros.length === 0) {
-      return { error: "No se encontraron números en el HTML" };
-    }
-
-    return {
-      fecha: fechaHoyFormato,
-      numeros: numeros,
-      cabeza: numeros.length > 0 ? numeros[0].num : null,
-      cantidad: numeros.length
-    };
-  }
-
-  // CÓRDOBA TURISTA
+  // CÓRDOBA
   try {
     const response = await fetch('https://www.tujugada.com.ar/quiniela_cordoba.asp', { 
       headers,
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(10000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.cordoba = parsearTujugadaTurista(html);
-      resultado.provincias.cordoba.url_usada = 'https://www.tujugada.com.ar/quiniela_cordoba.asp';
+      
+      resultado.urls.cordoba = {
+        status: 200,
+        longitud_html: html.length,
+        tiene_turista: html.toLowerCase().includes('turista'),
+        tiene_0883: html.includes('0883'),
+        tiene_8935: html.includes('8935'),
+        tiene_tabla: html.toLowerCase().includes('<table'),
+        fragmento_html_inicio: html.substring(0, 1000),
+        fragmento_html_fin: html.substring(html.length - 500),
+        
+        // Buscar índice de "turista"
+        indice_turista: html.toLowerCase().indexOf('turista'),
+        
+        // Si encuentra "turista", extraer 2000 chars alrededor
+        contexto_turista: null
+      };
+      
+      const idx = html.toLowerCase().indexOf('turista');
+      if (idx !== -1) {
+        resultado.urls.cordoba.contexto_turista = html.substring(
+          Math.max(0, idx - 200), 
+          Math.min(html.length, idx + 1800)
+        );
+      }
+      
     } else {
-      resultado.provincias.cordoba = { error: `HTTP ${response.status}` };
+      resultado.urls.cordoba = { error: `HTTP ${response.status}` };
     }
   } catch(e) {
-    resultado.provincias.cordoba = { error: e.message };
+    resultado.urls.cordoba = { error: e.message };
   }
 
-  // ENTRE RÍOS TURISTA
+  // ENTRE RÍOS
   try {
     const response = await fetch('https://www.tujugada.com.ar/quiniela_entre_rios.asp', { 
       headers,
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(10000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.entrerrios = parsearTujugadaTurista(html);
-      resultado.provincias.entrerrios.url_usada = 'https://www.tujugada.com.ar/quiniela_entre_rios.asp';
+      
+      resultado.urls.entrerrios = {
+        status: 200,
+        longitud_html: html.length,
+        tiene_turista: html.toLowerCase().includes('turista'),
+        tiene_1701: html.includes('1701'),
+        tiene_9446: html.includes('9446'),
+        tiene_tabla: html.toLowerCase().includes('<table'),
+        
+        indice_turista: html.toLowerCase().indexOf('turista'),
+        contexto_turista: null
+      };
+      
+      const idx = html.toLowerCase().indexOf('turista');
+      if (idx !== -1) {
+        resultado.urls.entrerrios.contexto_turista = html.substring(
+          Math.max(0, idx - 200), 
+          Math.min(html.length, idx + 1800)
+        );
+      }
+      
     } else {
-      resultado.provincias.entrerrios = { error: `HTTP ${response.status}` };
+      resultado.urls.entrerrios = { error: `HTTP ${response.status}` };
     }
   } catch(e) {
-    resultado.provincias.entrerrios = { error: e.message };
+    resultado.urls.entrerrios = { error: e.message };
   }
 
-  // Verificación
-  resultado.verificacion = {
-    cordoba_ok: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza === '0883',
-    cordoba_tiene_20: resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20,
-    entrerrios_ok: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cabeza === '1701',
-    entrerrios_tiene_20: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20,
-    listo_para_produccion: 
-      resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20 &&
-      resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20
+  resultado.conclusion = {
+    cordoba_accesible: resultado.urls.cordoba && resultado.urls.cordoba.status === 200,
+    cordoba_tiene_datos: resultado.urls.cordoba && resultado.urls.cordoba.tiene_0883,
+    entrerrios_accesible: resultado.urls.entrerrios && resultado.urls.entrerrios.status === 200,
+    entrerrios_tiene_datos: resultado.urls.entrerrios && resultado.urls.entrerrios.tiene_1701,
+    se_puede_scrapear: 
+      resultado.urls.cordoba && resultado.urls.cordoba.tiene_0883 &&
+      resultado.urls.entrerrios && resultado.urls.entrerrios.tiene_1701
   };
-
-  resultado.nota = "URLs de tujugada.com.ar son estáticas (no cambian por día), siempre muestran el último sorteo disponible";
 
   res.status(200).json(resultado);
 }
