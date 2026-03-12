@@ -1,4 +1,4 @@
-// SCRAPER TURISTA - ruta1000.com.ar
+// SCRAPER TURISTA - ruta1000.com.ar (URL correcta)
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -21,6 +21,10 @@ export default async function handler(req, res) {
   const anioHoy = ahoraArgentina.getFullYear();
   const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
 
+  // Obtener día de la semana en español
+  const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
+  const diaSemanaHoy = diasSemana[ahoraArgentina.getDay()];
+
   function htmlATexto(html) {
     return html.replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -33,25 +37,39 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
-  function parsearRuta1000Turista(html) {
+  function parsearRuta1000Turista(html, provincia) {
     const texto = htmlATexto(html);
     
-    // Buscar patrón: "TURISTA" seguido de fecha
-    const regexTurista = /TURISTA\s*DEL\s*\d{1,2}\s*DE\s*\w+\s*DE\s*\d{4}/i;
-    const matchTurista = regexTurista.exec(texto);
+    // Buscar múltiples patrones posibles
+    const patronesTurista = [
+      new RegExp(`${provincia.toUpperCase()}.*?TURISTA.*?\\d{1,2}\\s*DE\\s*\\w+\\s*DE\\s*\\d{4}`, 'i'),
+      new RegExp(`TURISTA.*?${provincia.toUpperCase()}.*?\\d{1,2}\\s*DE\\s*\\w+\\s*DE\\s*\\d{4}`, 'i'),
+      /SORTEADO\s*AYER.*?TURISTA.*?\d{1,2}\s*DE\s*\w+\s*DE\s*\d{4}/i,
+      /TURISTA\s*DEL\s*\d{1,2}\s*DE\s*\w+\s*DE\s*\d{4}/i
+    ];
+
+    let matchTurista = null;
+    for (const patron of patronesTurista) {
+      matchTurista = patron.exec(texto);
+      if (matchTurista) break;
+    }
     
     if (!matchTurista) {
-      return { error: "No se encontró el patrón TURISTA en el HTML" };
+      // Buscar simplemente "TURISTA" y extraer desde ahí
+      const idxTurista = texto.toUpperCase().indexOf('TURISTA');
+      if (idxTurista === -1) {
+        return { error: "No se encontró 'TURISTA' en el HTML" };
+      }
+      matchTurista = { index: idxTurista, 0: 'TURISTA' };
     }
 
     // Extraer números después del match
     const desde = matchTurista.index + matchTurista[0].length;
     const fragmento = texto.substring(desde, desde + 2000);
     
-    // Buscar tabla con números
-    // Patrón: 1° 0883 6° 5847 11° 9245...
+    // Patrón: 1° 0883 6° 5847 o 1º 0883 6º 5847
     const numeros = [];
-    const regex = /(\d{1,2})°\s*(\d{4})/g;
+    const regex = /(\d{1,2})[°º]\s*(\d{4})/g;
     let match;
     
     while ((match = regex.exec(fragmento)) !== null && numeros.length < 20) {
@@ -66,26 +84,39 @@ export default async function handler(req, res) {
     // Ordenar por posición
     numeros.sort((a, b) => a.pos - b.pos);
 
+    // Verificar que tengamos los 20 números en orden
+    const numerosCompletos = [];
+    for (let i = 1; i <= 20; i++) {
+      const encontrado = numeros.find(n => n.pos === i);
+      if (encontrado) {
+        numerosCompletos.push(encontrado);
+      }
+    }
+
     return {
       fecha: fechaHoyFormato,
-      numeros: numeros,
-      cabeza: numeros.length > 0 ? numeros[0].num : null,
-      cantidad: numeros.length
+      numeros: numerosCompletos,
+      cabeza: numerosCompletos.length > 0 ? numerosCompletos[0].num : null,
+      cantidad: numerosCompletos.length
     };
   }
 
   // CÓRDOBA TURISTA
   try {
-    const response = await fetch('https://www.ruta1000.com.ar/quiniela-de-cordoba/turista', { 
+    // URL dinámica según el día de la semana
+    const urlCordoba = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Cordoba_${diaSemanaHoy}`;
+    
+    const response = await fetch(urlCordoba, { 
       headers,
       signal: AbortSignal.timeout(8000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.cordoba = parsearRuta1000Turista(html);
+      resultado.provincias.cordoba = parsearRuta1000Turista(html, 'CORDOBA');
+      resultado.provincias.cordoba.url_usada = urlCordoba;
     } else {
-      resultado.provincias.cordoba = { error: `HTTP ${response.status}` };
+      resultado.provincias.cordoba = { error: `HTTP ${response.status}`, url: urlCordoba };
     }
   } catch(e) {
     resultado.provincias.cordoba = { error: e.message };
@@ -93,16 +124,19 @@ export default async function handler(req, res) {
 
   // ENTRE RÍOS TURISTA
   try {
-    const response = await fetch('https://www.ruta1000.com.ar/quiniela-de-entre-rios/turista', { 
+    const urlEntreRios = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Entre_Rios_${diaSemanaHoy}`;
+    
+    const response = await fetch(urlEntreRios, { 
       headers,
       signal: AbortSignal.timeout(8000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.entrerrios = parsearRuta1000Turista(html);
+      resultado.provincias.entrerrios = parsearRuta1000Turista(html, 'ENTRE RIOS');
+      resultado.provincias.entrerrios.url_usada = urlEntreRios;
     } else {
-      resultado.provincias.entrerrios = { error: `HTTP ${response.status}` };
+      resultado.provincias.entrerrios = { error: `HTTP ${response.status}`, url: urlEntreRios };
     }
   } catch(e) {
     resultado.provincias.entrerrios = { error: e.message };
@@ -110,9 +144,15 @@ export default async function handler(req, res) {
 
   // Verificación
   resultado.verificacion = {
-    cordoba_ok: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza === '0883',
-    entrerrios_ok: resultado.provincias.entrerrios && resultado.provincias.entrerrios.numeros && resultado.provincias.entrerrios.numeros.length > 0,
-    listo_para_produccion: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza === '0883'
+    cordoba_tiene_numeros: resultado.provincias.cordoba && resultado.provincias.cordoba.numeros && resultado.provincias.cordoba.numeros.length > 0,
+    cordoba_cabeza: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza,
+    entrerrios_tiene_numeros: resultado.provincias.entrerrios && resultado.provincias.entrerrios.numeros && resultado.provincias.entrerrios.numeros.length > 0,
+    listo_para_produccion: resultado.provincias.cordoba && resultado.provincias.cordoba.numeros && resultado.provincias.cordoba.numeros.length === 20
+  };
+
+  resultado.info = {
+    dia_semana_usado: diaSemanaHoy,
+    nota: "La URL cambia según el día de la semana (Lunes, Martes, Miercoles, etc.)"
   };
 
   res.status(200).json(resultado);
