@@ -1,10 +1,10 @@
-// SCRAPER TURISTA - ruta1000.com.ar (URL correcta)
+// SCRAPER TURISTA - tujugada.com.ar
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   const resultado = {
-    mensaje: "Scraper de Turista desde ruta1000.com.ar",
+    mensaje: "Scraper de Turista desde tujugada.com.ar",
     provincias: {}
   };
 
@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Accept': 'text/html,application/xhtml+xml',
     'Accept-Language': 'es-AR,es;q=0.9',
-    'Referer': 'https://www.ruta1000.com.ar/'
+    'Referer': 'https://www.tujugada.com.ar/'
   };
 
   const ahoraArgentina = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
@@ -20,11 +20,6 @@ export default async function handler(req, res) {
   const mesHoy = (ahoraArgentina.getMonth() + 1).toString().padStart(2, '0');
   const anioHoy = ahoraArgentina.getFullYear();
   const fechaHoyFormato = `${diaHoy}/${mesHoy}/${anioHoy}`;
-
-  // LÓGICA SIMPLE: usar día de HOY
-  // ruta1000.com actualiza el mismo día
-  const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-  const diaSemanaURL = diasSemana[ahoraArgentina.getDay()];
 
   function htmlATexto(html) {
     return html.replace(/<script[\s\S]*?<\/script>/gi, '')
@@ -38,86 +33,79 @@ export default async function handler(req, res) {
       .replace(/\n{3,}/g, '\n\n');
   }
 
-  function parsearRuta1000Turista(html, provincia) {
-    const texto = htmlATexto(html);
+  function parsearTujugadaTurista(html) {
+    // Buscar directamente en el HTML los números dentro de la tabla
+    // Patrón según las imágenes: tabla con Ubic | NUMERO
     
-    // Buscar múltiples patrones posibles
-    const patronesTurista = [
-      new RegExp(`${provincia.toUpperCase()}.*?TURISTA.*?\\d{1,2}\\s*DE\\s*\\w+\\s*DE\\s*\\d{4}`, 'i'),
-      new RegExp(`TURISTA.*?${provincia.toUpperCase()}.*?\\d{1,2}\\s*DE\\s*\\w+\\s*DE\\s*\\d{4}`, 'i'),
-      /SORTEADO\s*AYER.*?TURISTA.*?\d{1,2}\s*DE\s*\w+\s*DE\s*\d{4}/i,
-      /TURISTA\s*DEL\s*\d{1,2}\s*DE\s*\w+\s*DE\s*\d{4}/i
-    ];
-
-    let matchTurista = null;
-    for (const patron of patronesTurista) {
-      matchTurista = patron.exec(texto);
-      if (matchTurista) break;
-    }
-    
-    if (!matchTurista) {
-      // Buscar simplemente "TURISTA" y extraer desde ahí
-      const idxTurista = texto.toUpperCase().indexOf('TURISTA');
-      if (idxTurista === -1) {
-        return { error: "No se encontró 'TURISTA' en el HTML" };
-      }
-      matchTurista = { index: idxTurista, 0: 'TURISTA' };
-    }
-
-    // Extraer números después del match
-    const desde = matchTurista.index + matchTurista[0].length;
-    const fragmento = texto.substring(desde, desde + 2000);
-    
-    // Patrón: 1° 0883 6° 5847 o 1º 0883 6º 5847
     const numeros = [];
-    const regex = /(\d{1,2})[°º]\s*(\d{4})/g;
+    
+    // Estrategia 1: Buscar elementos <td> con números de 4 dígitos después de encontrar "Turista"
+    const idxTurista = html.toLowerCase().indexOf('turista');
+    if (idxTurista === -1) {
+      return { error: "No se encontró 'Turista' en el HTML" };
+    }
+
+    // Extraer fragmento HTML después de "Turista"
+    const fragmento = html.substring(idxTurista, idxTurista + 5000);
+    
+    // Buscar números dentro de <td> o texto plano
+    // Patrón: <td>0883</td> o similar
+    const regexTd = /<td[^>]*>\s*(\d{4})\s*<\/td>/gi;
     let match;
     
-    while ((match = regex.exec(fragmento)) !== null && numeros.length < 20) {
-      const pos = parseInt(match[1]);
-      const num = match[2];
+    while ((match = regexTd.exec(fragmento)) !== null && numeros.length < 20) {
+      const num = match[1];
+      numeros.push({ 
+        pos: numeros.length + 1, 
+        num: num 
+      });
+    }
+
+    // Si no encontró con <td>, intentar con texto plano
+    if (numeros.length === 0) {
+      const texto = htmlATexto(fragmento);
+      const lineas = texto.split('\n').map(l => l.trim()).filter(Boolean);
       
-      if (pos >= 1 && pos <= 20) {
-        numeros.push({ pos, num });
+      for (let i = 0; i < lineas.length && numeros.length < 20; i++) {
+        // Buscar patrón: número posición seguido de número de 4 dígitos
+        if (/^\d{1,2}$/.test(lineas[i])) {
+          const pos = parseInt(lineas[i]);
+          if (pos === numeros.length + 1 && lineas[i + 1] && /^\d{4}$/.test(lineas[i + 1])) {
+            numeros.push({ 
+              pos: pos, 
+              num: lineas[i + 1] 
+            });
+            i++; // saltar la línea del número
+          }
+        }
       }
     }
 
-    // Ordenar por posición
-    numeros.sort((a, b) => a.pos - b.pos);
-
-    // Verificar que tengamos los 20 números en orden
-    const numerosCompletos = [];
-    for (let i = 1; i <= 20; i++) {
-      const encontrado = numeros.find(n => n.pos === i);
-      if (encontrado) {
-        numerosCompletos.push(encontrado);
-      }
+    if (numeros.length === 0) {
+      return { error: "No se encontraron números en el HTML" };
     }
 
     return {
       fecha: fechaHoyFormato,
-      numeros: numerosCompletos,
-      cabeza: numerosCompletos.length > 0 ? numerosCompletos[0].num : null,
-      cantidad: numerosCompletos.length
+      numeros: numeros,
+      cabeza: numeros.length > 0 ? numeros[0].num : null,
+      cantidad: numeros.length
     };
   }
 
   // CÓRDOBA TURISTA
   try {
-    // URL dinámica según el día de la semana
-    const urlCordoba = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Cordoba_${diaSemanaURL}`;
-    
-    const response = await fetch(urlCordoba, { 
+    const response = await fetch('https://www.tujugada.com.ar/quiniela_cordoba.asp', { 
       headers,
       signal: AbortSignal.timeout(8000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.cordoba = parsearRuta1000Turista(html, 'CORDOBA');
-      resultado.provincias.cordoba.url_usada = urlCordoba;
+      resultado.provincias.cordoba = parsearTujugadaTurista(html);
+      resultado.provincias.cordoba.url_usada = 'https://www.tujugada.com.ar/quiniela_cordoba.asp';
     } else {
-      resultado.provincias.cordoba = { error: `HTTP ${response.status}`, url: urlCordoba };
+      resultado.provincias.cordoba = { error: `HTTP ${response.status}` };
     }
   } catch(e) {
     resultado.provincias.cordoba = { error: e.message };
@@ -125,19 +113,17 @@ export default async function handler(req, res) {
 
   // ENTRE RÍOS TURISTA
   try {
-    const urlEntreRios = `https://www.ruta1000.com.ar/index2008.php?Resultado=Quiniela_Entre_Rios_${diaSemanaURL}`;
-    
-    const response = await fetch(urlEntreRios, { 
+    const response = await fetch('https://www.tujugada.com.ar/quiniela_entre_rios.asp', { 
       headers,
       signal: AbortSignal.timeout(8000)
     });
     
     if (response.ok) {
       const html = await response.text();
-      resultado.provincias.entrerrios = parsearRuta1000Turista(html, 'ENTRE RIOS');
-      resultado.provincias.entrerrios.url_usada = urlEntreRios;
+      resultado.provincias.entrerrios = parsearTujugadaTurista(html);
+      resultado.provincias.entrerrios.url_usada = 'https://www.tujugada.com.ar/quiniela_entre_rios.asp';
     } else {
-      resultado.provincias.entrerrios = { error: `HTTP ${response.status}`, url: urlEntreRios };
+      resultado.provincias.entrerrios = { error: `HTTP ${response.status}` };
     }
   } catch(e) {
     resultado.provincias.entrerrios = { error: e.message };
@@ -145,17 +131,16 @@ export default async function handler(req, res) {
 
   // Verificación
   resultado.verificacion = {
-    cordoba_tiene_numeros: resultado.provincias.cordoba && resultado.provincias.cordoba.numeros && resultado.provincias.cordoba.numeros.length > 0,
-    cordoba_cabeza: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza,
-    entrerrios_tiene_numeros: resultado.provincias.entrerrios && resultado.provincias.entrerrios.numeros && resultado.provincias.entrerrios.numeros.length > 0,
-    listo_para_produccion: resultado.provincias.cordoba && resultado.provincias.cordoba.numeros && resultado.provincias.cordoba.numeros.length === 20
+    cordoba_ok: resultado.provincias.cordoba && resultado.provincias.cordoba.cabeza === '0883',
+    cordoba_tiene_20: resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20,
+    entrerrios_ok: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cabeza === '1701',
+    entrerrios_tiene_20: resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20,
+    listo_para_produccion: 
+      resultado.provincias.cordoba && resultado.provincias.cordoba.cantidad === 20 &&
+      resultado.provincias.entrerrios && resultado.provincias.entrerrios.cantidad === 20
   };
 
-  resultado.info = {
-    dia_actual: diasSemana[ahoraArgentina.getDay()],
-    dia_usado_en_url: diaSemanaURL,
-    nota: "Usando URL del día actual - ruta1000.com actualiza el mismo día"
-  };
+  resultado.nota = "URLs de tujugada.com.ar son estáticas (no cambian por día), siempre muestran el último sorteo disponible";
 
   res.status(200).json(resultado);
 }
