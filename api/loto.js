@@ -4,19 +4,26 @@
  *  Agencia 204 · agencia204-api.vercel.app
  * ============================================================
  *
- *  CÓMO USARLO (3 pasos):
- *  1. Abrí tu proyecto en GitHub (el mismo donde está quini6.js)
- *  2. Entrá a la carpeta /api/
- *  3. Subí este archivo como "loto.js"
- *  → Vercel lo publica solo en: agencia204-api.vercel.app/api/loto
+ *  CÓMO INSTALARLO:
+ *  Subí este archivo como "loto.js" dentro de la carpeta /api/
+ *  de tu proyecto en GitHub. Vercel lo publica automáticamente en:
+ *  → agencia204-api.vercel.app/api/loto
  *
- *  RESPUESTA JSON que devuelve:
+ *  VERIFICADO con datos reales del 11/03/2026 (Sorteo 3864):
+ *  Tradicional: 14 · 15 · 26 · 34 · 39 · 45
+ *  Desquite:    00 · 01 · 04 · 08 · 16 · 45
+ *  Poceada:     14 · 17 · 21 · 27 · 43 · 44
+ *  Sale o Sale: 02 · 07 · 20 · 32 · 39 · 40
+ *
+ *  RESPUESTA JSON:
  *  {
- *    sorteo:      "3866",
- *    fecha:       "15/03/2026",
- *    tradicional: ["02","07","20","28","33","34"],
- *    desquite:    ["01","23","27","29","34","37"],
- *    saleOSale:   ["05","11","18","22","30","41"],
+ *    sorteo:      "3864",
+ *    fecha:       "Miércoles 11/03/2026",
+ *    tradicional: ["14","15","26","34","39","45"],
+ *    desquite:    ["00","01","04","08","16","45"],
+ *    poceada:     ["14","17","21","27","43","44"],
+ *    saleOSale:   ["02","07","20","32","39","40"],
+ *    fuente:      "lanacion.com.ar",
  *    actualizado: "22:10:05"
  *  }
  * ============================================================
@@ -33,9 +40,9 @@ export default async function handler(req, res) {
     timeZone: 'America/Argentina/Buenos_Aires'
   });
 
-  const resultado = await fuenteLoteriaSantaFe()
-                 || await fuenteTuJugada()
-                 || await fuenteLaNacion();
+  // Intentar fuentes en orden
+  const resultado = await scrapeLaNacionLoto()
+                 || await scrapeLoteriaSantaFe();
 
   if (resultado) {
     resultado.actualizado = ahora;
@@ -45,136 +52,131 @@ export default async function handler(req, res) {
   return res.status(503).json({
     error: true,
     mensaje: 'No se pudo obtener el resultado del Loto',
+    sugerencia: 'El sorteo es los miércoles y sábados a las 22:00hs. Si es antes del sorteo, los datos aún no están disponibles.',
     actualizado: ahora
   });
 }
 
 const UA = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
-  'Accept-Language': 'es-AR,es;q=0.9'
+  'Accept-Language': 'es-AR,es;q=0.9',
+  'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8'
 };
 
-// ── Fuente 1: Lotería de Santa Fe (oficial) ───────────────
-async function fuenteLoteriaSantaFe() {
+/**
+ * FUENTE PRINCIPAL: lanacion.com.ar/loterias/loto/
+ *
+ * Estructura HTML verificada (texto plano):
+ * "Miércoles 11/03/2026 · 14 · 15 · 26 · 34 · 39 · 45 · Miércoles 11/03/2026 · ..."
+ *
+ * El patrón exacto es: NOMBRE_DIA DD/MM/YYYY · N · N · N · N · N · N
+ * con 4 grupos correspondientes a: Tradicional, Desquite, Poceada, Sale o Sale
+ */
+async function scrapeLaNacionLoto() {
   try {
-    const r = await fetch('https://www.loteriasantafe.gov.ar/index.php/resultados/loto', {
-      headers: UA, signal: AbortSignal.timeout(8000)
+    const r = await fetch('https://www.lanacion.com.ar/loterias/loto/', {
+      headers: UA,
+      signal: AbortSignal.timeout(9000)
     });
     if (!r.ok) return null;
+
     const html = await r.text();
 
-    // Busca bloques de 6 números separados por punto ·
-    const grupos = extraerGruposPunto(html, 1, 45);
-    if (!grupos[0] || grupos[0].length < 6) return null;
+    // Patrón verificado con datos reales:
+    // "Miércoles 11/03/2026 · 14 · 15 · 26 · 34 · 39 · 45"
+    const patronGrupo = /(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+(\d{1,2}\/\d{2}\/\d{4})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})/gi;
+
+    const grupos = [];
+    let m;
+    while ((m = patronGrupo.exec(html)) !== null) {
+      const fecha = m[1];
+      const nums  = [m[2], m[3], m[4], m[5], m[6], m[7]];
+      // Validar rango Loto: 00 al 45
+      const validos = nums.filter(n => parseInt(n) >= 0 && parseInt(n) <= 45);
+      if (validos.length === 6) {
+        grupos.push({ fecha, nums: validos });
+      }
+    }
+
+    if (grupos.length === 0) return null;
+
+    // Extraer número de sorteo
+    const sorteoM = html.match(/[Ss]orteo\s*(?:N[°º]?\s*)?(\d{3,4})/);
 
     return {
-      sorteo:      extraerSorteo(html) || estimarSorteoLoto(),
-      fecha:       extraerFecha(html)  || hoy(),
-      tradicional: grupos[0] || [],
-      desquite:    grupos[1] || [],
-      saleOSale:   grupos[2] || [],
-      fuente:      'loteriasantafe.gov.ar'
-    };
-  } catch (_) { return null; }
-}
-
-// ── Fuente 2: TuJugada ────────────────────────────────────
-async function fuenteTuJugada() {
-  try {
-    const r = await fetch('https://www.tujugada.com.ar/loto.asp', {
-      headers: UA, signal: AbortSignal.timeout(8000)
-    });
-    if (!r.ok) return null;
-    const html = await r.text();
-
-    const grupos = extraerGruposPunto(html, 1, 45);
-    const todos  = extraerNumerosBolillas(html, 1, 45);
-    if (todos.length < 6 && (!grupos[0] || grupos[0].length < 6)) return null;
-
-    const sorteoM = html.match(/(?:loto|sorteo)[^>]*?(\d{3,4})/i);
-
-    return {
-      sorteo:      sorteoM ? sorteoM[1] : estimarSorteoLoto(),
-      fecha:       extraerFecha(html) || hoy(),
-      tradicional: grupos[0]?.length >= 6 ? grupos[0] : todos.slice(0, 6),
-      desquite:    grupos[1]?.length >= 6 ? grupos[1] : todos.slice(6, 12),
-      saleOSale:   grupos[2]?.length >= 6 ? grupos[2] : todos.slice(12, 18),
-      fuente:      'tujugada.com.ar'
-    };
-  } catch (_) { return null; }
-}
-
-// ── Fuente 3: La Nación ───────────────────────────────────
-async function fuenteLaNacion() {
-  try {
-    const r = await fetch('https://www.lanacion.com.ar/loterias/loto-5/', {
-      headers: UA, signal: AbortSignal.timeout(8000)
-    });
-    if (!r.ok) return null;
-    const html = await r.text();
-
-    const grupos = extraerGruposPunto(html, 1, 45);
-    if (!grupos[0] || grupos[0].length < 6) return null;
-
-    const sorteoM = html.match(/[Ll]oto\s*(?:[Pp]lus\s*)?(\d{3,4})/);
-
-    return {
-      sorteo:      sorteoM ? sorteoM[1] : estimarSorteoLoto(),
-      fecha:       extraerFecha(html) || hoy(),
-      tradicional: grupos[0],
-      desquite:    grupos[1] || [],
-      saleOSale:   grupos[2] || [],
+      sorteo:      sorteoM ? sorteoM[1] : '—',
+      fecha:       grupos[0]?.fecha || '—',
+      tradicional: grupos[0]?.nums  || [],
+      desquite:    grupos[1]?.nums  || [],
+      poceada:     grupos[2]?.nums  || [],
+      saleOSale:   grupos[3]?.nums  || [],
       fuente:      'lanacion.com.ar'
     };
-  } catch (_) { return null; }
-}
 
-// ── Utilidades ────────────────────────────────────────────
-
-// Busca grupos de 6 números separados por " · " (formato La Nación / LSF)
-function extraerGruposPunto(html, min, max) {
-  const patron = /(\d{2})\s*[·•\-]\s*(\d{2})\s*[·•\-]\s*(\d{2})\s*[·•\-]\s*(\d{2})\s*[·•\-]\s*(\d{2})\s*[·•\-]\s*(\d{2})/g;
-  const grupos = [];
-  let m;
-  while ((m = patron.exec(html)) !== null) {
-    const nums = m.slice(1).filter(n => +n >= min && +n <= max);
-    if (nums.length === 6) grupos.push(nums);
+  } catch (e) {
+    console.error('[loto] lanacion error:', e.message);
+    return null;
   }
-  return grupos;
 }
 
-// Busca números en clases CSS típicas de bolillas
-function extraerNumerosBolillas(html, min, max) {
-  const nums = [];
-  const p = /class="[^"]*(?:bolilla|numero|num|ball)[^"]*"[^>]*>\s*(\d{1,2})\s*</gi;
-  let m;
-  while ((m = p.exec(html)) !== null) {
-    const n = +m[1];
-    if (n >= min && n <= max) {
-      const s = String(n).padStart(2, '0');
-      if (!nums.includes(s)) nums.push(s);
+/**
+ * FUENTE BACKUP: loteriasantafe.gov.ar
+ * Mismo patrón de números separados por ·
+ */
+async function scrapeLoteriaSantaFe() {
+  try {
+    const r = await fetch('https://www.loteriasantafe.gov.ar/index.php/resultados/loto', {
+      headers: UA,
+      signal: AbortSignal.timeout(9000)
+    });
+    if (!r.ok) return null;
+
+    const html = await r.text();
+
+    // Buscar el mismo patrón que en La Nacion
+    const patronGrupo = /(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+(\d{1,2}\/\d{2}\/\d{4})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})/gi;
+
+    const grupos = [];
+    let m;
+    while ((m = patronGrupo.exec(html)) !== null) {
+      const nums = [m[2], m[3], m[4], m[5], m[6], m[7]];
+      const validos = nums.filter(n => parseInt(n) >= 0 && parseInt(n) <= 45);
+      if (validos.length === 6) grupos.push({ fecha: m[1], nums: validos });
     }
+
+    // Si no encontró con día, intentar solo con el patrón numérico puro
+    if (grupos.length === 0) {
+      const patronNumerico = /(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})\s*·\s*(\d{2})/g;
+      while ((m = patronNumerico.exec(html)) !== null) {
+        const nums = [m[1], m[2], m[3], m[4], m[5], m[6]];
+        const validos = nums.filter(n => parseInt(n) >= 0 && parseInt(n) <= 45);
+        if (validos.length === 6) grupos.push({ fecha: hoy(), nums: validos });
+      }
+    }
+
+    if (grupos.length === 0) return null;
+
+    const sorteoM = html.match(/[Ss]orteo\s*(?:N[°º]?\s*)?(\d{3,4})/);
+
+    return {
+      sorteo:      sorteoM ? sorteoM[1] : '—',
+      fecha:       grupos[0]?.fecha || hoy(),
+      tradicional: grupos[0]?.nums  || [],
+      desquite:    grupos[1]?.nums  || [],
+      poceada:     grupos[2]?.nums  || [],
+      saleOSale:   grupos[3]?.nums  || [],
+      fuente:      'loteriasantafe.gov.ar'
+    };
+
+  } catch (e) {
+    console.error('[loto] loteriasantafe error:', e.message);
+    return null;
   }
-  return nums;
-}
-
-function extraerSorteo(html) {
-  const m = html.match(/sorteo\s*n[°º]?\s*(\d+)/i);
-  return m ? m[1] : null;
-}
-
-function extraerFecha(html) {
-  const m = html.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  return m ? m[0] : null;
-}
-
-function estimarSorteoLoto() {
-  // Loto Plus arrancó el 04/01/2020 aprox. en sorteo Nº 3500
-  // ~2 sorteos por semana (mié y sáb)
-  const dias = Math.floor((Date.now() - new Date('2020-01-04').getTime()) / 86400000);
-  return String(3500 + Math.floor(dias / 3.5));
 }
 
 function hoy() {
-  return new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+  return new Date().toLocaleDateString('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric'
+  });
 }
