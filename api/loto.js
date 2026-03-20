@@ -250,4 +250,3 @@ function calcularSegsHastaProxSorteoLoto() {
 
   return Math.max(minDiff * 60, 300); // mínimo 5 minutos
 }
-
