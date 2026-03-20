@@ -2,27 +2,20 @@
  * /api/brinco.js — Vercel Serverless Function
  * Agencia 204 · agencia204-api.vercel.app
  *
- * LÓGICA:
- *  - El Brinco sortea los DOMINGOS a las 21:00hs
- *  - Los datos se obtienen de nacionalloteria.com (HTTPS, HTML estático)
- *  - Se cachean hasta el PRÓXIMO DOMINGO después de las 21:30hs
- *  - La fecha mostrada es SIEMPRE la del domingo del sorteo (no la de hoy)
+ * BUG CORREGIDO: el "-" en URLs como "2026-03-15" se interpretaba
+ * como separador de lista y capturaba "03" y "15" como números del sorteo.
+ * Solución: usar <li>NN</li> como extractor principal (sin riesgo),
+ * y "* NN" anclado a línea completa como fallback.
  *
- * DATOS CORRECTOS (verificados 20/03/2026):
+ * LÓGICA SEMANAL:
+ *  - Sortea los DOMINGOS a las 21:00hs AR
+ *  - El cache expira el próximo domingo a las 21:30hs → se auto-actualiza
+ *  - La fecha mostrada es SIEMPRE la del domingo del sorteo
+ *
+ * DATOS VERIFICADOS (20/03/2026):
  *  Sorteo 1345 · Domingo 15 de Marzo de 2026
- *  Tradicional: 17 · 18 · 21 · 26 · 36 · 39
- *  Junior:      10 · 14 · 24 · 30 · 36 · 37
- *
- * RESPUESTA JSON:
- * {
- *   sorteo:      "1345",
- *   fecha:       "Domingo 15 de Marzo de 2026",
- *   tradicional: ["17","18","21","26","36","39"],
- *   junior:      ["10","14","24","30","36","37"],
- *   proximo:     "Domingo 22 de Marzo de 2026",
- *   fuente:      "nacionalloteria.com",
- *   actualizado: "21:05:00"
- * }
+ *  Tradicional: 17 · 18 · 21 · 26 · 36 · 39  ✅
+ *  Junior:      10 · 14 · 24 · 30 · 36 · 37  ✅
  */
 
 export default async function handler(req, res) {
@@ -31,12 +24,9 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
-  // ── Cache dinámico: expira el próximo domingo a las 21:30hs AR ──
-  // Así Vercel sirve los mismos datos toda la semana sin re-scrapear
-  const segundosHastaProxDomingo = calcularSegsHastaProxSorteo();
-  res.setHeader('Cache-Control',
-    `s-maxage=${segundosHastaProxDomingo}, stale-while-revalidate=3600`
-  );
+  // Cache hasta el próximo domingo 21:30hs AR
+  const segsCache = calcularSegsHastaProxSorteo();
+  res.setHeader('Cache-Control', `s-maxage=${segsCache}, stale-while-revalidate=3600`);
 
   const ahora = new Date().toLocaleTimeString('es-AR', {
     timeZone: 'America/Argentina/Buenos_Aires'
@@ -44,11 +34,11 @@ export default async function handler(req, res) {
 
   const debug = [];
 
-  // ── Fuente 1: nacionalloteria.com ─────────────────────────
+  // ── Fuente 1: nacionalloteria.com (HTTPS, HTML estático) ──
   let resultado = await intentar('nacionalloteria', async () => {
     const r = await fetch('https://www.nacionalloteria.com/argentina/brinco.php', {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124',
+        'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124',
         'Accept':          'text/html,application/xhtml+xml',
         'Accept-Language': 'es-AR,es;q=0.9',
         'Cache-Control':   'no-cache'
@@ -60,12 +50,12 @@ export default async function handler(req, res) {
     return parsearNacionalLoteria(html);
   }, debug);
 
-  // ── Fuente 2: tujugada.com.ar ──────────────────────────────
+  // ── Fuente 2: tujugada.com.ar (HTTPS, backup) ─────────────
   if (!resultado) {
     resultado = await intentar('tujugada', async () => {
       const r = await fetch('https://www.tujugada.com.ar/brinco.asp', {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124',
+          'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124',
           'Accept':          'text/html',
           'Accept-Language': 'es-AR,es;q=0.9'
         },
@@ -84,9 +74,9 @@ export default async function handler(req, res) {
   }
 
   return res.status(503).json({
-    error:     true,
-    mensaje:   'No se pudo obtener el resultado del Brinco',
-    sugerencia:'El sorteo es los domingos a las 21:00hs.',
+    error:       true,
+    mensaje:     'No se pudo obtener el resultado del Brinco',
+    sugerencia:  'El sorteo es los domingos a las 21:00hs.',
     debug,
     actualizado: ahora
   });
@@ -94,26 +84,21 @@ export default async function handler(req, res) {
 
 // ─────────────────────────────────────────────────────────────
 //  PARSER NACIONAL LOTERIA
+//  URL: nacionalloteria.com/argentina/brinco.php
 //
-//  HTML real (UTF-8, HTTPS, verificado 20/03/2026):
+//  HTML crudo real:
+//    Resultados del Brinco 1345<a href="...del-dia=2026-03-15#lista">Lista...</a>
+//    <ul><li>17</li><li>18</li><li>21</li><li>26</li><li>36</li><li>39</li></ul>
+//    Resultados del Brinco Junior 1345
+//    <ul><li>10</li><li>14</li><li>24</li><li>30</li><li>36</li><li>37</li></ul>
 //
-//  # Brinco 1345 - Domingo 15 de Marzo de 2026
-//  Resultados del Brinco 1345Lista de Premios
-//  * 17
-//  * 18
-//  * 21
-//  * 26
-//  * 36
-//  * 39
-//  Resultados del Brinco Junior 1345
-//  * 10
-//  * 14
-//  ...
+//  BUG ANTERIOR: [*\-•]\s*(\d{1,2}) capturaba "03" y "15" del URL "2026-03-15"
+//  FIX: usar <li>NN</li> como extractor principal (el "-" no aparece en <li>)
 // ─────────────────────────────────────────────────────────────
 function parsearNacionalLoteria(html) {
   if (!html || html.length < 200) return null;
 
-  // Encontrar el primer bloque (sorteo más reciente)
+  // Primer sorteo (más reciente): "Resultados del Brinco 1345"
   const mTrad = html.match(/Resultados del Brinco (\d+)/);
   if (!mTrad) return null;
 
@@ -123,27 +108,19 @@ function parsearNacionalLoteria(html) {
   const iJr     = html.indexOf(textoJr, iTrad);
   if (iJr === -1) return null;
 
-  // Fin del bloque Junior: primer "---" o próximo sorteo
+  // Delimitador fin del Junior: primer "---" o +400 chars
   const iSep = html.indexOf('---', iJr);
-  const iEnd = iSep > iJr ? iSep : iJr + 300;
+  const iEnd = iSep > iJr ? iSep : iJr + 400;
 
   const bloqueTrad = html.slice(iTrad, iJr);
   const bloqueJr   = html.slice(iJr + textoJr.length, iEnd);
 
-  // Extraer números de listas "* NN" o "<li>NN</li>"
-  const extraer = (bloque) =>
-    [...bloque.matchAll(/[*\-•]\s*(\d{1,2})\b|<li[^>]*>\s*(\d{1,2})\s*<\/li>/g)]
-      .map(m => m[1] ?? m[2])
-      .filter(n => n !== undefined && parseInt(n) >= 0 && parseInt(n) <= 39)
-      .map(n => String(parseInt(n)).padStart(2, '0'));
-
-  const numsTrad = extraer(bloqueTrad);
-  const numsJr   = extraer(bloqueJr);
+  const numsTrad = extraerNumeros(bloqueTrad);
+  const numsJr   = extraerNumeros(bloqueJr);
 
   if (numsTrad.length < 6) return null;
 
-  // ── FECHA: siempre del domingo del sorteo, nunca de hoy ──
-  // Estrategia 1: texto "Brinco 1345 - Domingo 15 de Marzo de 2026"
+  // Fecha del sorteo: del texto "Brinco 1345 - Domingo 15 de Marzo de 2026"
   const fechaTxt = html.match(
     new RegExp(
       'Brinco\\s+' + sorteo + '\\s*[-–]\\s*' +
@@ -153,18 +130,16 @@ function parsearNacionalLoteria(html) {
     )
   );
 
-  // Estrategia 2: URL ?del-dia=2026-03-15 → formatear
-  const fechaURL = html.match(/del-dia[=\-](\d{4}-\d{2}-\d{2})/);
+  // Fallback: URL ?del-dia=2026-03-15
+  const fechaURL = html.match(/del-dia[=](\d{4}-\d{2}-\d{2})/);
 
   let fechaSorteo;
   if (fechaTxt) {
-    fechaSorteo = fechaTxt[1];
-    // Capitalizar primera letra
-    fechaSorteo = fechaSorteo.charAt(0).toUpperCase() + fechaSorteo.slice(1);
+    const f = fechaTxt[1].trim();
+    fechaSorteo = f.charAt(0).toUpperCase() + f.slice(1);
   } else if (fechaURL) {
     fechaSorteo = formatearFechaISO(fechaURL[1]);
   } else {
-    // Fallback: calcular el último domingo sorteado
     fechaSorteo = fechaUltimoDomingo();
   }
 
@@ -189,10 +164,12 @@ function parsearTuJugada(html) {
 
   const sorteo  = mSorteo[1];
   const iInicio = html.indexOf(mSorteo[0]);
-  const mNext   = html.slice(iInicio + 1).match(
+  const mNext   = html.slice(iInicio + 10).match(
     new RegExp('BRINCO\\s+SORTEO\\s+(?!' + sorteo + ')\\d+', 'i')
   );
-  const iNext  = mNext ? iInicio + 1 + html.slice(iInicio + 1).indexOf(mNext[0]) : html.length;
+  const iNext  = mNext
+    ? iInicio + 10 + html.slice(iInicio + 10).indexOf(mNext[0])
+    : html.length;
   const bloque = html.slice(iInicio, iNext);
 
   const reNum = /<[Tt][Dd][^>]*>\s*<[Bb]>\s*(\d{1,2})\s*<\/[Bb]>\s*<\/[Tt][Dd]>/g;
@@ -206,14 +183,9 @@ function parsearTuJugada(html) {
 
   if (nums.length < 6) return null;
 
-  // Fecha desde DD/MM/YYYY
-  const fechaPartes = mSorteo[2].split('/');
-  const d = parseInt(fechaPartes[0]);
-  const mo = parseInt(fechaPartes[1]);
-  const y  = parseInt(fechaPartes[2]);
-  const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const partes = mSorteo[2].split('/');
+  const d = parseInt(partes[0]), mo = parseInt(partes[1]), y = parseInt(partes[2]);
   const dt = new Date(y, mo - 1, d);
-  const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
   const fechaSorteo = `${DIAS[dt.getDay()]} ${d} de ${MESES[mo]} de ${y}`;
 
   return {
@@ -227,7 +199,34 @@ function parsearTuJugada(html) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  UTILIDADES DE FECHA
+//  EXTRACTOR DE NÚMEROS — CORREGIDO
+//
+//  Prioridad 1: <li>NN</li>  → el "-" de URLs nunca aparece aquí ✅
+//  Prioridad 2: líneas "* NN" ancladas a línea completa (markdown)
+//               NO incluye "-" como separador → no captura "03" del "2026-03-15"
+// ─────────────────────────────────────────────────────────────
+function extraerNumeros(bloque) {
+  // Intento 1: <li>NN</li> (HTML crudo del servidor)
+  const liMatches = [...bloque.matchAll(/<li[^>]*>[ \t]*(\d{1,2})[ \t]*<\/li>/gi)];
+  if (liMatches.length >= 6) {
+    return liMatches
+      .map(m => m[1])
+      .filter(n => parseInt(n) >= 0 && parseInt(n) <= 39)
+      .map(n => String(parseInt(n)).padStart(2, '0'));
+  }
+
+  // Intento 2: líneas "* NN" ancladas — SOLO asterisco como marcador (NO guión)
+  // Regex: inicio de línea + espacios + "*" + espacio + 1-2 dígitos + fin de línea
+  // Esto NO captura "2026-03-15" ni "Lista de Premios"
+  const mdMatches = [...bloque.matchAll(/^[ \t]*\*[ \t]+(\d{1,2})[ \t]*$/gm)];
+  return mdMatches
+    .map(m => m[1])
+    .filter(n => parseInt(n) >= 0 && parseInt(n) <= 39)
+    .map(n => String(parseInt(n)).padStart(2, '0'));
+}
+
+// ─────────────────────────────────────────────────────────────
+//  UTILIDADES
 // ─────────────────────────────────────────────────────────────
 
 const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -235,25 +234,23 @@ const MESES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
 const DIAS  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
 
 function ahoraAR() {
-  // Devuelve un Date con la hora de Argentina (UTC-3)
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  return new Date(new Date().toLocaleString('en-US', {
+    timeZone: 'America/Argentina/Buenos_Aires'
+  }));
 }
 
 function formatearFechaISO(iso) {
-  // "2026-03-15" → "Domingo 15 de Marzo de 2026"
   const [y, m, d] = iso.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
   return `${DIAS[dt.getDay()]} ${d} de ${MESES[m]} de ${y}`;
 }
 
 function fechaUltimoDomingo() {
-  const ahora = ahoraAR();
-  const dia   = ahora.getDay(); // 0=domingo
-  // Si hoy es domingo Y ya pasaron las 21:30 = hoy es el sorteo
-  // Si hoy es domingo Y no pasaron las 21:30 = el domingo pasado
-  const esHoy = dia === 0 && ahora.getHours() >= 22;
-  const offset = esHoy ? 0 : (dia === 0 ? 7 : dia);
-  const dom = new Date(ahora);
+  const ahora  = ahoraAR();
+  const dia    = ahora.getDay();
+  const yaSorteo = dia === 0 && ahora.getHours() >= 22;
+  const offset = yaSorteo ? 0 : (dia === 0 ? 7 : dia);
+  const dom    = new Date(ahora);
   dom.setDate(ahora.getDate() - offset);
   return `${DIAS[0]} ${dom.getDate()} de ${MESES[dom.getMonth() + 1]} de ${dom.getFullYear()}`;
 }
@@ -268,26 +265,19 @@ function fechaProximoDomingo() {
 }
 
 function calcularSegsHastaProxSorteo() {
-  // Calcula cuántos segundos faltan hasta el próximo domingo 21:30hs AR
-  // Esto le dice a Vercel cuánto cachear la respuesta
   const ahora  = ahoraAR();
-  const dom    = new Date(ahora);
   const dia    = ahora.getDay();
   const offset = dia === 0 ? 7 : (7 - dia);
+  const dom    = new Date(ahora);
   dom.setDate(ahora.getDate() + offset);
   dom.setHours(21, 30, 0, 0);
-
-  const segs = Math.max(Math.floor((dom - ahora) / 1000), 300);
-  return segs; // mínimo 5 minutos, máximo ~7 días
+  return Math.max(Math.floor((dom - ahora) / 1000), 300);
 }
 
 async function intentar(nombre, fn, debugArr) {
   try {
     const r = await fn();
-    if (r) {
-      debugArr.push({ fuente: nombre, estado: 'OK' });
-      return r;
-    }
+    if (r) { debugArr.push({ fuente: nombre, estado: 'OK' }); return r; }
     debugArr.push({ fuente: nombre, estado: 'sin datos' });
     return null;
   } catch (e) {
