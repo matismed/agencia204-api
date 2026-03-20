@@ -1,4 +1,4 @@
-// v4 - ruta1000.com.ar - igual que Brinco que ya funciona
+// v4 - ruta1000.com.ar - igual que Brinco que ya funciona.
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'no-store');
