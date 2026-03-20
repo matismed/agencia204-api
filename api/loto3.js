@@ -1,12 +1,112 @@
-// loto3 - debug loto5 estructura real
+// loto3 - PRODUCCION FINAL - ruta1000.com.ar
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'no-store');
-  const r   = await fetch('http://loto5.ruta1000.com.ar/', { headers:{'User-Agent':'Mozilla/5.0'}, signal:AbortSignal.timeout(10000) });
-  const buf = await r.arrayBuffer();
-  const html= new TextDecoder('iso-8859-1').decode(buf);
-  const i   = html.indexOf('Sorteo N');
-  const blk = html.slice(i, i+800);
-  const tds = [...blk.matchAll(/<[Tt][Dd][^>]*>([\s\S]*?)<\/[Tt][Dd]>/g)].slice(0,15).map(m=>m[1].trim().replace(/<[^>]+>/g,'').trim().slice(0,30));
-  return res.status(200).json({ i, blk600: blk.slice(0,600), tds });
+  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
+
+  const ahora = new Date().toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+  const debug = [];
+
+  const [hL, hL5] = await Promise.all([
+    get('http://loto.ruta1000.com.ar/',  'loto',  debug),
+    get('http://loto5.ruta1000.com.ar/', 'loto5', debug)
+  ]);
+
+  const loto  = hL  ? pLoto(hL)   : null;
+  const loto5 = hL5 ? pLoto5(hL5) : null;
+
+  if (!loto && !loto5)
+    return res.status(503).json({ error: true, debug, actualizado: ahora });
+
+  return res.status(200).json({ loto, loto5, debug, actualizado: ahora });
 }
+
+async function get(url, nombre, dbg) {
+  try {
+    const r    = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const buf  = await r.arrayBuffer();
+    const html = new TextDecoder('iso-8859-1').decode(buf);
+    if (html.length < 500) throw new Error('corto');
+    dbg.push({ n: nombre, via: 'directo', len: html.length });
+    return html;
+  } catch (e1) {
+    try {
+      const r2   = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(url), { signal: AbortSignal.timeout(12000) });
+      const j    = await r2.json();
+      if (!j.contents || j.contents.length < 500) throw new Error('vacio');
+      dbg.push({ n: nombre, via: 'proxy', len: j.contents.length });
+      return j.contents;
+    } catch (e2) {
+      dbg.push({ n: nombre, via: 'error', e1: e1.message, e2: e2.message });
+      return null;
+    }
+  }
+}
+
+// ── LOTO PLUS ─────────────────────────────────────────────────
+// Números en <td><b>N</b></td>
+// 24 nums en 2 filas x 4 modalidades x 3 cols
+function pLoto(html) {
+  const SS = [...html.matchAll(/Sorteo\s+N[°º\xb0\xba\u00ba]?\s*(\d+)/gi)];
+  if (!SS.length) return null;
+  const blk = html.slice(SS[0].index, SS[1]?.index ?? html.length);
+  const re  = /<[Tt][Dd][^>]*>\s*<[Bb]>\s*(\d{1,2})\s*<\/[Bb]>\s*<\/[Tt][Dd]>/g;
+  const N   = []; let m;
+  while ((m = re.exec(blk)) !== null) { N.push(+m[1]); if (N.length >= 24) break; }
+  if (N.length < 12) return null;
+  const T=[], M=[], D=[], S=[];
+  for (let i=0; i<2; i++) {
+    const b=i*12;
+    T.push(...N.slice(b,   b+3)); M.push(...N.slice(b+3, b+6));
+    D.push(...N.slice(b+6, b+9)); S.push(...N.slice(b+9, b+12));
+  }
+  const sM = blk.match(/Sorteo\s+N[°º\xb0\xba\u00ba]?\s*(\d+)/i);
+  const fM = blk.match(/((?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+\d+\s+de\s+\w+\s+de\s+\d{4})/i);
+  const pM = blk.match(/NUMERO\s+PLUS[:\s]+(\d)/i);
+  return {
+    sorteo: sM?.[1]??'—', fecha: fM?cap(fM[1]):'—',
+    tradicional:T.map(p2), match:M.map(p2), desquite:D.map(p2), saleOSale:S.map(p2),
+    ...(pM&&{jack:pM[1]}), fuente:'ruta1000'
+  };
+}
+
+// ── LOTO 5 ────────────────────────────────────────────────────
+// HTML real verificado:
+//   <td style="border:solid 2px black" width="20%">
+//     <b><FONT COLOR=FF0000> 1</font></b></font>
+//   </td>
+// Los números están dentro de <td> con tags <b><FONT> adentro
+// Solución: extraer texto plano del <td> quitando los tags internos
+function pLoto5(html) {
+  const iSorteo = html.indexOf('Sorteo N');
+  if (iSorteo === -1) return null;
+
+  // Fin del bloque: segundo "Sorteo N" o "PREMIOS"
+  const iSorteo2 = html.indexOf('Sorteo N', iSorteo + 10);
+  const iPremios = html.toUpperCase().indexOf('PREMIOS', iSorteo);
+  const iFin = Math.min(
+    iSorteo2 > iSorteo ? iSorteo2 : Infinity,
+    iPremios > iSorteo ? iPremios : Infinity,
+    iSorteo + 3000
+  );
+  const blk = html.slice(iSorteo, iFin);
+
+  // Extraer texto plano de cada <td>, ignorar tags internos
+  const re = /<[Tt][Dd][^>]*>([\s\S]*?)<\/[Tt][Dd]>/g;
+  const N  = []; let m;
+  while ((m = re.exec(blk)) !== null) {
+    const txt = m[1].replace(/<[^>]+>/g, '').trim();
+    const n   = parseInt(txt);
+    if (!isNaN(n) && n >= 0 && n <= 36) N.push(p2(n));
+    if (N.length >= 5) break;
+  }
+  if (N.length < 5) return null;
+
+  const sM = blk.match(/Sorteo\s+N[°º\xb0\xba\u00ba]?\s*(\d+)/i);
+  const fM = blk.match(/((?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\s+\d+\s+de\s+\w+\s+de\s+\d{4})/i);
+  return { sorteo:sM?.[1]??'—', fecha:fM?cap(fM[1]):'—', numeros:N, fuente:'ruta1000' };
+}
+
+const p2  = n => String(n).padStart(2,'0');
+const cap = s => s?s[0].toUpperCase()+s.slice(1):s;
